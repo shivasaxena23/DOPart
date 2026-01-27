@@ -1,0 +1,81 @@
+import torch
+import torch.nn as nn
+import torchvision.models as models
+import torchvision.transforms as transforms
+import torchvision.datasets as datasets
+import time
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Load CIFAR-10 sample
+transform = transforms.Compose([
+    transforms.Resize(224),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])
+])
+
+dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+x, _ = dataset[0]
+x = x.unsqueeze(0).to(device)
+
+# Load ResNet-101
+model = models.resnet101(pretrained=True)
+model.fc = nn.Linear(model.fc.in_features, 10)
+model = model.to(device)
+model.eval()
+
+# Measure Runtime per Layer
+layer_times = {}
+
+def make_timing_hook(name):
+    def hook_fn(module, input, output):
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        start_time = time.time()
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        end_time = time.time()
+        elapsed = (end_time - start_time) * 1000  # ms
+        layer_times[name] = elapsed  # Just timestamp (you can fill this manually if needed)
+    return hook_fn
+
+# Instead, use forward pre- and post-hooks to track start/end timestamps
+start_times = {}
+end_times = {}
+
+def pre_hook(name):
+    def hook(module, input):
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        start_times[name] = time.time()
+    return hook
+
+def post_hook(name):
+    def hook(module, input, output):
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        end_times[name] = time.time()
+    return hook
+
+# Attach pre and post hooks to leaf modules only
+handles = []
+for name, module in model.named_modules():
+    if len(list(module.children())) == 0:
+        handles.append(module.register_forward_pre_hook(pre_hook(name)))
+        handles.append(module.register_forward_hook(post_hook(name)))
+
+# Run a forward pass
+with torch.no_grad():
+    _ = model(x)
+
+# Compute durations
+layer_times = {
+    name: (end_times[name] - start_times[name]) * 1000
+    for name in start_times if name in end_times
+}
+
+# Remove hooks
+for h in handles:
+    h.remove()
+
+# Print layer-wise times
+print("\n✅ Layer-wise timing (in ms):")
+for name, t in layer_times.items():
+    print(f"{name:<40}: {t:.6f} ms")

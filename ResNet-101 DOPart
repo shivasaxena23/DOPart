@@ -1,0 +1,172 @@
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import math
+import random
+from scipy.special import lambertw
+from math import e
+
+n = 20
+np.random.seed(42)
+m = 1
+M_set = [2,3,4,6,8,10,12] 
+
+def RAND(A,M,Tr):
+
+  b = random.random()
+  al = M/m
+  ep = (-M* lambertw((1/(al*e))-1/e).real)
+
+  for i in A[:-1]:
+
+
+
+      k = M - (M-m)/(math.exp(b*(M-ep)/M))
+
+      thresh = k
+
+      if  i <= thresh*Tr:
+        # print("RAND:", i)
+        return i
+
+  # print(sum(current_comps_local), alg)
+  return A[-1]
+
+
+
+def RANDR(A,M,Tr):
+  
+  al = M/m
+  ep = (-M* lambertw((1/(al*e))-1/e).real)
+  
+  for i in A[:-1]:
+      b = random.random()
+
+
+      k = M - (M-m)/(math.exp(b*(M-ep)/M))
+
+      thresh = k
+
+      if  i <= thresh*Tr:
+        # print("RANDR:", i)
+        return i
+
+  # print(sum(current_comps_local), alg)
+  return A[-1]
+
+def DET(A,M,Tr):
+
+  for i in A[:-1]:
+      thresh = math.sqrt(M * m)*Tr
+
+      if  i <= thresh:
+        # print("DET:", i)
+        return i
+  # print(sum(current_comps_local), alg)
+  return A[-1]
+
+#Non Adaptive Randomized Thresholding Algorithm
+
+def THREATR(A,M,Tr):
+
+  al = M/m
+  ratio = 1/(1+(lambertw((1/(al*e))-1/e).real))
+  old_i = M*Tr/ratio
+  a = 0
+  for i in A[:-1]:
+      if  i < old_i:
+        if a == 0:
+           s = (M*Tr-ratio*i)/(M*Tr-i)
+        else:
+           s = ratio*(old_i-i)/(M*Tr-i)
+        old_i = i
+        a = a + s
+        if random.random() <= s:
+            return i
+  return A[-1]
+
+def THREATD(A,M,Tr):
+
+  al = M/m
+  ratio = 1/(1+(lambertw((1/(al*e))-1/e).real))
+  old_i = M*Tr/ratio
+  a = 0
+  total = 0
+  for i in A[:-1]:
+      if  i < old_i:
+        if a == 0:
+           s = (M*Tr-ratio*i)/(M*Tr-i)
+        else:
+           s = ratio*(old_i-i)/(M*Tr-i)
+        old_i = i
+        a = a + s
+        total += s*old_i
+  total += A[-1] * (1 - a)
+  return total
+
+opt_offload = []
+
+index = 0
+# with open("layer_runtimes.txt", "r") as f:
+#     remote = [float(line.strip()) for line in f]
+#     n = len(remote) 
+
+# with open("input_sizes_resnet101.txt", "r") as f:
+#     data = [float(line.strip()) for line in f]
+
+with open("resnet152_avg_runtime.txt", "r") as f:
+    remote = [float(line.strip()) for line in f]
+    n = len(remote) 
+
+with open("resnet152_input_size_bytes.txt", "r") as f:
+    data = [float(line.strip()) for line in f]
+
+for M in M_set:
+    TOPT_sum = 0
+    TDET_sum = 0
+    TRAND_sum = 0
+    TRANDR_sum = 0
+    TTHREATR_sum = 0
+    TTHREATD_sum = 0
+    opt_offload_freq = [0 for _ in range(n+1)]
+    for  k in range(10000):
+        vals = []
+        
+        local = [(m +random.random() * (M - m))*remote[i] for i in range(n)]
+        comm = [i/(2750 + 500*random.random()) for i in data]
+        # 2350
+        # 14600
+        for i in range(n):
+          val = sum(local[:i]) + comm[i] + sum(remote[i:])
+          vals.append(val)
+        
+        vals.append(sum(local))
+
+        TOPT = min(vals)   
+        TDET = DET(vals,M,sum(remote))
+        TRAND = RAND(vals,M,sum(remote))
+        TRANDR = RANDR(vals,M,sum(remote))
+        TTHREATR = THREATR(vals,M,sum(remote))
+        TTHREATD = THREATD(vals,M,sum(remote))
+        TOPT_sum += TOPT
+        TDET_sum += TDET    
+        TRAND_sum += TRAND
+        TRANDR_sum += TRANDR
+        TTHREATR_sum += TTHREATR
+        TTHREATD_sum += TTHREATD
+        opt_offload_freq[np.argmin(vals)] += 1
+    opt_offload.append([TOPT_sum/10000, TDET_sum/10000, TRAND_sum/10000])
+    print("M:", M," TOPT:{:.3f}".format(TOPT_sum/10000), "TDET:{:.3f}".format(TDET_sum/10000), "TRAND:{:.3f}".format(TRAND_sum/10000), "TRANDR:{:.3f}".format(TRANDR_sum/10000), "TTHREATR:{:.3f}".format(TTHREATR_sum/10000), "TTHREATD:{:.3f}".format(TTHREATD_sum/10000))
+df = pd.DataFrame(opt_offload)
+print(df)
+sns.lineplot(data=df)
+
+# Save to PDF
+plt.savefig("seaborn_plot.pdf", format='pdf', bbox_inches='tight')
+
+# Optional: close the plot
+plt.close()
+
+
+plt.show()
