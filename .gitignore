@@ -1,0 +1,16 @@
+# Large files
+*.tar.gz
+*.zip
+
+# Data directories
+data/
+*.npy
+
+# Jupyter
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
