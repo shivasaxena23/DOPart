@@ -4,14 +4,21 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
-from project.data_generation import system_values
-from project.methods import ALPHAOPT, TBP, DOPart, DOPartARAND, DOPartARANDR, DOPartRAND, DOPartRANDR
+from data_generation import system_values
+from methods import ALPHAOPT, TBP, DOPart, DOPartARAND, DOPartARANDR, DOPartRAND, DOPartRANDR
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-l", "--layers", type=int, default=0)
+args = parser.parse_args()
+
+v = args.layers
 
 alphas = [1,1.5,2,2.5,3]
 
 algs = ["AutoNeuro", "DOPart", "Neuro", "Remote Only", "Local Only", "DOPart-R", "DOPart-DR", "DOPart-AR", "DOPart-DAR", "Threat Based", "OPT"]
 
-current_comps_remote, input_data_real = system_values(1)
+current_comps_remote, input_data_real = system_values(v)
 
 
 def genAlphas(a,b,n):
@@ -50,19 +57,28 @@ def generateSamples(i):
       if comms_uniform == False:
         current_comms_uniform_AN.append(input_data_real[p]/rb)
       else:
-        current_comms_uniform_AN.append((a+random.random()*(b-a))*Rl)
+        current_comms_uniform_AN.append((a-1+random.random()*(b-a))*Rl)
     current_comms_uniform_AN.append(0)
     current_comms_uniform.append(current_comms_uniform_AN)
 
   makespan = []
+  max_makespan = []
+  min_makespan = []
   for p in range(len(current_comms_uniform[0])):
       val = 0
+      max = 0
+      min = 100*sum(current_comps_remote)
       for z in range(7000):
           val = val + sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:])
+          if sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:]) > max:
+            max = sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:])
+          if sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:]) < min:
+            min = sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:])
       val = val/7000
       makespan.append(val)
+      max_makespan.append(max)
+      min_makespan.append(min)
   ANeuro_best_point = np.argmin(makespan)
-
   for j in range(7000):
 
     alg_best11 = sum(current_comps_local[j][:ANeuro_best_point]) + current_comms_uniform[j][ANeuro_best_point] + sum(current_comps_remote[ANeuro_best_point:])
@@ -156,10 +172,6 @@ labels[0], labels[1] = labels[1], labels[0]
 ax.legend(handles=handles[0:], labels=labels[0:])
 
 [x.set_linewidth(0.5) for x in ax.spines.values()]
-
-
-# ax.grid(False)
-# plt.ticklabel_format(style='sci', axis='y')
 
 plt.savefig("resnet34_max.pdf", bbox_inches='tight')
 plt.show()
