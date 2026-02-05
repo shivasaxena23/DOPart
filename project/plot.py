@@ -14,12 +14,15 @@ args = parser.parse_args()
 
 v = args.layers
 
-alphas = [1,1.5,2,2.5,3]
-
+if v != 0:
+  alphas = [1,1.5,2,2.5,3]
+else:
+  alphas = [1,1.5,2,2.5,3]
 algs = ["AutoNeuro", "DOPart", "Neuro", "Remote Only", "Local Only", "DOPart-R", "DOPart-DR", "DOPart-AR", "DOPart-DAR", "Threat Based", "OPT"]
 
 current_comps_remote, input_data_real = system_values(v)
 
+print(len(current_comps_remote))
 
 def genAlphas(a,b,n):
     return [a+(b-a)*random.random() for _ in range(n)]
@@ -117,8 +120,13 @@ def generateSamples(i):
     TALG[10].append(opt_best)
   return (TALG)
 
-log_uniform = False
-comms_uniform = True
+if v!=0:
+  log_uniform = False
+  comms_uniform = True
+else:
+  log_uniform = True
+  comms_uniform = False
+
 TALG_final = [[] for _ in range(len(algs))] 
 
 for i in range(len(alphas)):
