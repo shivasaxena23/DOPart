@@ -178,6 +178,7 @@ handles, labels = ax.get_legend_handles_labels()
 handles[0], handles[1] = handles[1], handles[0]
 labels[0], labels[1] = labels[1], labels[0]
 ax.legend(handles=handles[0:], labels=labels[0:])
+ax.grid(True)
 
 [x.set_linewidth(0.5) for x in ax.spines.values()]
 
