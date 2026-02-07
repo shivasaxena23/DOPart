@@ -9,15 +9,32 @@ from methods import ALPHAOPT, TBP, DOPart, DOPartARAND, DOPartARANDR, DOPartRAND
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-l", "--layers", type=int, default=0)
+parser.add_argument("--stages", type=int, default=0)
+
+# booleans
+parser.add_argument("--comms-uniform", action=argparse.BooleanOptionalAction, default=False)
+parser.add_argument("--log-uniform", action=argparse.BooleanOptionalAction, default=False)
+
+# floats
+parser.add_argument("--alpha-min", type=float, default=1.0)
+parser.add_argument("--alpha-max", type=float, default=4.0)
+parser.add_argument("--alpha-fixed", action=argparse.BooleanOptionalAction, default=True)
+parser.add_argument("--lower-bound", type=float, default=0.25)
+parser.add_argument("--upper-bound", type=float, default=2.5)
+
 args = parser.parse_args()
 
-v = args.layers
+v = args.stages
+comms_uniform = args.comms_uniform
+if not comms_uniform:
+  lb = args.lower_bound
+  ub = args.upper_bound
+log_uniform = args.log_uniform
+alpha_fixed = args.alpha_fixed
+alpha_min = args.alpha_min
+alpha_max = args.alpha_max
 
-if v != 0:
-  alphas = [1,1.5,2,2.5,3]
-else:
-  alphas = [1,1.5,2,2.5,3]
+alphas = [alpha_min + 0.5*i for i in range(int(round((alpha_max-alpha_min)/0.5))+1)]
 algs = ["AutoNeuro", "DOPart", "Neuro", "Remote Only", "Local Only", "DOPart-R", "DOPart-DR", "DOPart-AR", "DOPart-DAR", "Threat Based", "OPT"]
 
 current_comps_remote, input_data_real = system_values(v)
@@ -25,30 +42,32 @@ current_comps_remote, input_data_real = system_values(v)
 print(len(current_comps_remote))
 
 def genAlphas(a,b,n):
-    return [a+(b-a)*random.random() for _ in range(n)]
+    if not log_uniform:
+        return [random.uniform(a,b) for _ in range(n)]
+    else:
+        return [math.pow(2,random.uniform(a,b)) for _ in range(n)]
 
 def generateSamples(i):
-
-  R = alphas[i]
-  r = 1
-  if log_uniform == True:
-    b = math.pow(2,R)
-    a = math.pow(2,r)
-  else:
-     b = R
-     a = r
-
-  lb = 0.25
-  ub = 2.5
+  local_alpha_min = alpha_min
+  local_alpha_max = alpha_max
   
+  if alpha_fixed:
+    local_alpha_max = alphas[i]
+  else:
+    local_alpha_min = alphas[i]
+
+  if log_uniform:
+    b = math.pow(2,local_alpha_max)
+    a = math.pow(2,local_alpha_min)
+  else:
+    b = local_alpha_max
+    a = local_alpha_min
 
   TALG = [[] for _ in range(len(algs))] 
-  
-
 
   current_comps_local = []
   for z in range(7000):
-    current_comps_local.append(np.multiply(current_comps_remote,genAlphas(a,b,len(current_comps_remote))))
+    current_comps_local.append(np.multiply(current_comps_remote,genAlphas(local_alpha_min,local_alpha_max,len(current_comps_remote))))
 
   current_comms_uniform = []
   Rl = sum(current_comps_remote)
@@ -57,7 +76,7 @@ def generateSamples(i):
     current_comms_uniform_AN = []
     for p in range(len(current_comps_remote)):    
       rb = bandwidth*(lb) + random.random()*(bandwidth)*(ub)
-      if comms_uniform == False:
+      if not comms_uniform:
         current_comms_uniform_AN.append(input_data_real[p]/rb)
       else:
         current_comms_uniform_AN.append((a-1+random.random()*(b-a))*Rl)
@@ -120,12 +139,12 @@ def generateSamples(i):
     TALG[10].append(opt_best)
   return (TALG)
 
-if v!=0:
-  log_uniform = False
-  comms_uniform = True
-else:
-  log_uniform = True
-  comms_uniform = False
+# if v!=0:
+#   log_uniform = False
+#   comms_uniform = True
+# else:
+#   log_uniform = True
+#   comms_uniform = False
 
 TALG_final = [[] for _ in range(len(algs))] 
 
@@ -135,7 +154,7 @@ for i in range(len(alphas)):
   for j in range(len(TALG)):
     TALG_final[j].append(TALG[j])
 
-ignore = [0,2]
+ignore = [0,2,6,8]
 compiled = []
 
 for k in range(len(algs)):
@@ -167,7 +186,7 @@ d_style[algs[-1]] = (5, 10)
 h = sns.lineplot(x="Alpha",y="Average Makespan", hue="Alg", data=df_main1,style="Alg",linewidth=1, palette=['g', 'black','b','r','magenta', 'orange', 'cyan'],
     markers=True, dashes=d_style, markersize=8, err_style="band", err_kws={'alpha':0.1}) #NEWDOPartRAND
 h.set_xticks(alphas) # <--- set the ticks first
-if log_uniform == True:
+if log_uniform:
   h.set_xlabel(r'$\log_2\alpha$' + r'$_\mathregular{max}$')
 else:
   h.set_xlabel(r'$\alpha$' + r'$_\mathregular{max}$')
