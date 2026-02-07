@@ -50,7 +50,7 @@ def genAlphas(a,b,n):
 def generateSamples(i):
   local_alpha_min = alpha_min
   local_alpha_max = alpha_max
-  
+
   if alpha_fixed:
     local_alpha_max = alphas[i]
   else:
@@ -101,6 +101,7 @@ def generateSamples(i):
       max_makespan.append(max)
       min_makespan.append(min)
   ANeuro_best_point = np.argmin(makespan)
+  
   for j in range(7000):
 
     alg_best11 = sum(current_comps_local[j][:ANeuro_best_point]) + current_comms_uniform[j][ANeuro_best_point] + sum(current_comps_remote[ANeuro_best_point:])
