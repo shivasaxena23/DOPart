@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 from data_generation import system_values
-from methods import ALPHAOPT, TBP, DOPart, DOPartARAND, DOPartARANDR, DOPartRAND, DOPartRANDR
+from methods import ALPHAOPT, TBP, DOPart, DOPartARAND, DOPartARANDR, DOPartRAND, DOPartRANDR, TBP_ratio
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -34,9 +34,9 @@ alpha_fixed = args.alpha_fixed
 alpha_min = args.alpha_min
 alpha_max = args.alpha_max
 
-alphas = [alpha_min + 0.5*i for i in range(int(round((alpha_max-alpha_min)/0.5))+1)]
+alphas = [0.5 + 0.5*i for i in range(int(round((alpha_max-0.5)/0.5))+1)]
 algs = ["AutoNeuro", "DOPart", "Neuro", "Remote Only", "Local Only", "DOPart-R", "DOPart-DR", "DOPart-AR", "DOPart-DAR", "Threat Based", "OPT"]
-
+print(alphas)
 current_comps_remote, input_data_real = system_values(v)
 
 print(len(current_comps_remote))
@@ -102,6 +102,8 @@ def generateSamples(i):
       min_makespan.append(min)
   ANeuro_best_point = np.argmin(makespan)
   
+  ratio = TBP_ratio(a,b,len(current_comms_uniform[0]))
+
   for j in range(7000):
 
     alg_best11 = sum(current_comps_local[j][:ANeuro_best_point]) + current_comms_uniform[j][ANeuro_best_point] + sum(current_comps_remote[ANeuro_best_point:])
@@ -121,7 +123,7 @@ def generateSamples(i):
     alg_best6, c_cut6, alg_best6_point = DOPartRANDR(current_comms_uniform[j],current_comps_local[j],current_comps_remote, a, b) #USED
     alg_best7, c_cut7, alg_best7_point = DOPartARAND(current_comms_uniform[j],current_comps_local[j],current_comps_remote, a, b) #USED
     alg_best8, c_cut8, alg_best8_point = DOPartARANDR(current_comms_uniform[j],current_comps_local[j],current_comps_remote, a, b) #USED
-    alg_best9, c_cut9, alg_best9_point = TBP(current_comms_uniform[j],current_comps_local[j],current_comps_remote, a, b) #USED
+    alg_best9, c_cut9, alg_best9_point = TBP(current_comms_uniform[j],current_comps_local[j],current_comps_remote, a, b,ratio) #USED
     
     alg_best2 = sum(current_comps_local[j][:0]) + current_comms_uniform[j][0] + sum(current_comps_remote[0:])
     alg_best3 = sum(current_comps_local[j][:len(current_comps_local[j])]) + current_comms_uniform[j][len(current_comps_local[j])] + sum(current_comps_remote[len(current_comps_local[j]):])

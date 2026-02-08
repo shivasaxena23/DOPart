@@ -148,29 +148,48 @@ def DOPartARANDR(current_comms_uniform,current_comps_local,current_comps_remote,
 
   return sum(current_comps_local),0, len(current_comms_uniform)
 
-#Non Adaptive Double Randomized Thresholding Algorithm
-def TBP(current_comms_uniform,current_comps_local,current_comps_remote,r,R):
+def TBP_ratio(r,R,n):
+  diff = R-r
+  ratio_tbp = R
+  for i in range(10000):
+      x = random.uniform(r,R)
+      t = math.pow(((1-1/x)/(1-r/R)),(1/n))
+      v = 1/(n*(1-t))
+      if abs(v-x) < diff:
+          diff = abs(v-x)
+          ratio_tbp = x
+  return ratio_tbp
+
+
+#Threat-Based Policy (Randomized)
+def TBP(current_comms_uniform,current_comps_local,current_comps_remote,r,R,ratio):
 
   Tr = sum(current_comps_remote)
-  alm = r
   alM = R
+  alm = r
   al = alM/alm
-  ep = (-R* lambertw((1/(al*e))-1/e)).real
-
+  # old_i = alM*Tr/ratio #empirically better than old for smaller values
+  old_i = alM*Tr #Original Plots
+  # old_i = ratio*Tr #experimenting
+  a = 0.0
+  # ratio = 1/(1+(lambertw((1/(al*e))-1/e).real))
 
   for i in range(len(current_comms_uniform)):
-      
-      b = random.random()
-      bound = (-R/(R-ep))*np.log(ep/(R-r))
-      if b >= bound:
-        k = R
-      else:
-        k = R - (R-r)/(math.exp(b*(R-ep)/R))
-
-      thresh = k
-      
       T_i = sum(current_comps_local[:i]) + current_comms_uniform[i] + sum(current_comps_remote[i:])
-      if  T_i <= thresh*Tr:
-        return T_i, current_comms_uniform[i], i
+      if T_i < old_i:
+          denom = (alM*Tr - T_i)
+          if denom == 0:
+              continue
+
+          if a == 0:
+              s = (alM*Tr - ratio*T_i)/denom
+          else:
+              s = ratio*(old_i - T_i)/denom
+
+          old_i = T_i
+          a += s
+
+          if random.random() <= s:
+              return T_i, current_comms_uniform[i], i
 
   return sum(current_comps_local),0, len(current_comms_uniform)
