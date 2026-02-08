@@ -149,10 +149,16 @@ def DOPartARANDR(current_comms_uniform,current_comps_local,current_comps_remote,
   return sum(current_comps_local),0, len(current_comms_uniform)
 
 def TBP_ratio(r,R,n):
+  print("R: ", R, "r: ", r)
+  r = min(r,1)
+
+  if r == R:
+     return 1
+
   diff = R-r
   ratio_tbp = R
   for i in range(10000):
-      x = random.uniform(r,R)
+      x = random.uniform(1,R/r)
       t = math.pow(((1-1/x)/(1-r/R)),(1/n))
       v = 1/(n*(1-t))
       if abs(v-x) < diff:

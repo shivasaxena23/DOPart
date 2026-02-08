@@ -34,7 +34,7 @@ alpha_fixed = args.alpha_fixed
 alpha_min = args.alpha_min
 alpha_max = args.alpha_max
 
-alphas = [0.5 + 0.5*i for i in range(int(round((alpha_max-0.5)/0.5))+1)]
+alphas = [alpha_min + 0.5*i for i in range(int(round((alpha_max-alpha_min)/0.5))+1)]
 algs = ["AutoNeuro", "DOPart", "Neuro", "Remote Only", "Local Only", "DOPart-R", "DOPart-DR", "DOPart-AR", "DOPart-DAR", "Threat Based", "OPT"]
 print(alphas)
 current_comps_remote, input_data_real = system_values(v)
@@ -189,10 +189,18 @@ d_style[algs[-1]] = (5, 10)
 h = sns.lineplot(x="Alpha",y="Average Makespan", hue="Alg", data=df_main1,style="Alg",linewidth=1, palette=['g', 'black','b','r','magenta', 'orange', 'cyan'],
     markers=True, dashes=d_style, markersize=8, err_style="band", err_kws={'alpha':0.1}) #NEWDOPartRAND
 h.set_xticks(alphas) # <--- set the ticks first
-if log_uniform:
-  h.set_xlabel(r'$\log_2\alpha$' + r'$_\mathregular{max}$')
+
+if alpha_fixed:
+  if log_uniform:
+    h.set_xlabel(r'$\log_2\alpha$' + r'$_\mathregular{max}$')
+  else:
+    h.set_xlabel(r'$\alpha$' + r'$_\mathregular{max}$')
 else:
-  h.set_xlabel(r'$\alpha$' + r'$_\mathregular{max}$')
+  if log_uniform:
+    h.set_xlabel(r'$\log_2\alpha$' + r'$_\mathregular{min}$')
+  else:
+    h.set_xlabel(r'$\alpha$' + r'$_\mathregular{min}$')
+
 h.set_ylabel(r'Average ' + r'$T_\mathregular{ALG}$' + r' [ms]')
 h.ticklabel_format(useMathText=True)
 
@@ -206,3 +214,5 @@ ax.grid(True)
 
 plt.savefig("resnet34_max.pdf", bbox_inches='tight')
 plt.show()
+
+#  python .\project\plot.py --stages 0 --no-comms-uniform --log-uniform --alpha-min 0 --alpha-max 2.5 --alpha-fixed --lower-bound 0.25 --upper-bound 2.5
