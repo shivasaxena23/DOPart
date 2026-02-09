@@ -1,3 +1,4 @@
+from datetime import datetime
 import math
 import random
 import seaborn as sns
@@ -63,6 +64,8 @@ def generateSamples(i):
     b = local_alpha_max
     a = local_alpha_min
 
+  a = min(a,1)
+
   TALG = [[] for _ in range(len(algs))] 
 
   current_comps_local = []
@@ -88,18 +91,18 @@ def generateSamples(i):
   min_makespan = []
   for p in range(len(current_comms_uniform[0])):
       val = 0
-      max = 0
-      min = 100*sum(current_comps_remote)
+      maximum = 0
+      minimum = 100*sum(current_comps_remote)
       for z in range(7000):
           val = val + sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:])
-          if sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:]) > max:
-            max = sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:])
-          if sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:]) < min:
-            min = sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:])
+          if sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:]) > maximum:
+            maximum = sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:])
+          if sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:]) < minimum:
+            minimum = sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:])
       val = val/7000
       makespan.append(val)
-      max_makespan.append(max)
-      min_makespan.append(min)
+      max_makespan.append(maximum)
+      min_makespan.append(minimum)
   ANeuro_best_point = np.argmin(makespan)
   
   ratio = TBP_ratio(a,b,len(current_comms_uniform[0]))
@@ -204,6 +207,25 @@ else:
 h.set_ylabel(r'Average ' + r'$T_\mathregular{ALG}$' + r' [ms]')
 h.ticklabel_format(useMathText=True)
 
+# Add command-line parameters to the figure.
+cmd_parts = [
+  f"stages={v}",
+  f"comms_uniform={comms_uniform}",
+  f"log_uniform={log_uniform}",
+  f"alpha_min={alpha_min}",
+  f"alpha_max={alpha_max}",
+  f"alpha_fixed={alpha_fixed}",
+  f"lower_bound={lb}",
+  f"upper_bound={ub}",
+]
+fig.text(
+  0.01, 0.01,
+  "Args: " + ", ".join(cmd_parts),
+  ha="left",
+  va="bottom",
+  fontsize=7,
+)
+
 handles, labels = ax.get_legend_handles_labels()
 handles[0], handles[1] = handles[1], handles[0]
 labels[0], labels[1] = labels[1], labels[0]
@@ -212,7 +234,10 @@ ax.grid(True)
 
 [x.set_linewidth(0.5) for x in ax.spines.values()]
 
-plt.savefig("resnet34_max.pdf", bbox_inches='tight')
+ts = datetime.now().strftime("%Y-%b-%d_%H-%M-%S")
+out_path = fr"C:\Users\shiva\Dropbox\shared\DOPart\Randomized\Experiments\DOPart_Randomized_{ts}.pdf"
+plt.savefig(out_path, bbox_inches="tight")
+
 plt.show()
 
 #  python .\project\plot.py --stages 0 --no-comms-uniform --log-uniform --alpha-min 0 --alpha-max 2.5 --alpha-fixed --lower-bound 0.25 --upper-bound 2.5

@@ -172,8 +172,8 @@ def TBP(current_comms_uniform,current_comps_local,current_comps_remote,r,R,ratio
 
   Tr = sum(current_comps_remote)
   alM = R
-  alm = r
-  al = alM/alm
+  # alm = r
+  # al = alM/alm
   # old_i = alM*Tr/ratio #empirically better than old for smaller values
   old_i = alM*Tr #Original Plots
   # old_i = ratio*Tr #experimenting
