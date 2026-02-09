@@ -1,12 +1,12 @@
 from datetime import datetime
 import math
-import random
+from pathlib import Path
 import seaborn as sns
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 from data_generation import system_values
-from methods import ALPHAOPT, TBP, DOPart, DOPartARAND, DOPartARANDR, DOPartRAND, DOPartRANDR, TBP_ratio
+from methods import TBP, DOPart, DOPartARAND, DOPartARANDR, DOPartRAND, DOPartRANDR, TBP_ratio, rand_threshold_params
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -24,12 +24,13 @@ parser.add_argument("--lower-bound", type=float, default=0.25)
 parser.add_argument("--upper-bound", type=float, default=2.5)
 
 args = parser.parse_args()
+NUM_SAMPLES = 7000
+IGNORED_ALGS = {0, 2, 6, 8}
 
 v = args.stages
 comms_uniform = args.comms_uniform
-if not comms_uniform:
-  lb = args.lower_bound
-  ub = args.upper_bound
+lb = args.lower_bound
+ub = args.upper_bound
 log_uniform = args.log_uniform
 alpha_fixed = args.alpha_fixed
 alpha_min = args.alpha_min
@@ -39,14 +40,16 @@ alphas = [alpha_min + 0.5*i for i in range(int(round((alpha_max-alpha_min)/0.5))
 algs = ["AutoNeuro", "DOPart", "Neuro", "Remote Only", "Local Only", "DOPart-R", "DOPart-DR", "DOPart-AR", "DOPart-DAR", "Threat Based", "OPT"]
 print(alphas)
 current_comps_remote, input_data_real = system_values(v)
+current_comps_remote = np.asarray(current_comps_remote, dtype=float)
+input_data_real = np.asarray(input_data_real, dtype=float)
 
 print(len(current_comps_remote))
 
-def genAlphas(a,b,n):
+def genAlphas(a,b,size):
     if not log_uniform:
-        return [random.uniform(a,b) for _ in range(n)]
+        return np.random.uniform(a, b, size=size)
     else:
-        return [math.pow(2,random.uniform(a,b)) for _ in range(n)]
+        return np.power(2.0, np.random.uniform(a, b, size=size))
 
 def generateSamples(i):
   local_alpha_min = alpha_min
@@ -65,84 +68,69 @@ def generateSamples(i):
     a = local_alpha_min
 
   a = min(a,1)
+  n_layers = current_comps_remote.size
 
-  TALG = [[] for _ in range(len(algs))] 
+  TALG = [np.zeros(NUM_SAMPLES, dtype=float) for _ in range(len(algs))]
 
-  current_comps_local = []
-  for z in range(7000):
-    current_comps_local.append(np.multiply(current_comps_remote,genAlphas(local_alpha_min,local_alpha_max,len(current_comps_remote))))
+  alpha_scales = genAlphas(local_alpha_min, local_alpha_max, size=(NUM_SAMPLES, n_layers))
+  current_comps_local = alpha_scales * current_comps_remote
 
-  current_comms_uniform = []
-  Rl = sum(current_comps_remote)
+  Rl = float(np.sum(current_comps_remote))
   bandwidth=input_data_real[0]/Rl
-  for z in range(7000):
-    current_comms_uniform_AN = []
-    for p in range(len(current_comps_remote)):    
-      rb = bandwidth*(lb) + random.random()*(bandwidth)*(ub)
-      if not comms_uniform:
-        current_comms_uniform_AN.append(input_data_real[p]/rb)
-      else:
-        current_comms_uniform_AN.append((a-1+random.random()*(b-a))*Rl)
-    current_comms_uniform_AN.append(0)
-    current_comms_uniform.append(current_comms_uniform_AN)
 
-  makespan = []
-  max_makespan = []
-  min_makespan = []
-  for p in range(len(current_comms_uniform[0])):
-      val = 0
-      maximum = 0
-      minimum = 100*sum(current_comps_remote)
-      for z in range(7000):
-          val = val + sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:])
-          if sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:]) > maximum:
-            maximum = sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:])
-          if sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:]) < minimum:
-            minimum = sum(current_comps_local[z][:p])+current_comms_uniform[z][p]+sum(current_comps_remote[p:])
-      val = val/7000
-      makespan.append(val)
-      max_makespan.append(maximum)
-      min_makespan.append(minimum)
-  ANeuro_best_point = np.argmin(makespan)
+  if not comms_uniform:
+    rb = bandwidth * lb + np.random.random((NUM_SAMPLES, n_layers)) * bandwidth * ub
+    comms_body = input_data_real / rb
+  else:
+    comms_body = (a - 1 + np.random.random((NUM_SAMPLES, n_layers)) * (b - a)) * Rl
+  current_comms_uniform = np.concatenate((comms_body, np.zeros((NUM_SAMPLES, 1), dtype=float)), axis=1)
+
+  local_prefix = np.cumsum(current_comps_local, axis=1, dtype=float)
+  local_prefix = np.concatenate((np.zeros((NUM_SAMPLES, 1), dtype=float), local_prefix), axis=1)
+  remote_suffix = np.empty(n_layers + 1, dtype=float)
+  remote_suffix[-1] = 0.0
+  if n_layers:
+    remote_suffix[:-1] = np.cumsum(current_comps_remote[::-1])[::-1]
+
+  makespan_matrix = local_prefix + current_comms_uniform + remote_suffix
+  if 0 not in IGNORED_ALGS:
+    makespan = np.mean(makespan_matrix, axis=0)
+    ANeuro_best_point = int(np.argmin(makespan))
+  else:
+    ANeuro_best_point = 0
   
-  ratio = TBP_ratio(a,b,len(current_comms_uniform[0]))
+  ratio = TBP_ratio(a,b,current_comms_uniform.shape[1])
+  rand_params = rand_threshold_params(a, b)
 
-  for j in range(7000):
+  for j in range(NUM_SAMPLES):
+    comms_j = current_comms_uniform[j]
+    local_j = current_comps_local[j]
+    totals_j = makespan_matrix[j]
 
-    alg_best11 = sum(current_comps_local[j][:ANeuro_best_point]) + current_comms_uniform[j][ANeuro_best_point] + sum(current_comps_remote[ANeuro_best_point:])
+    opt_best = float(np.min(totals_j))
     
-    comm_neuro = 0
-    comp_neuro = current_comps_local[j][0]/current_comps_remote[0]
-    current_comms_uniform_neuro = [input_data_real[p]/comm_neuro for p in range(len(current_comps_local[j]))]
-    current_comms_uniform_neuro.append(0)
-    current_comps_local_neuro = comp_neuro*current_comps_remote
-    alg_best13, opt_best_point, max_seq = ALPHAOPT(current_comms_uniform_neuro,current_comps_local_neuro,current_comps_remote)
-    alg_best13 = sum(current_comps_local[j][:opt_best_point]) + current_comms_uniform[j][opt_best_point] + sum(current_comps_remote[opt_best_point:])
+    if 0 not in IGNORED_ALGS:
+      TALG[0][j] = float(totals_j[ANeuro_best_point])
+    if 2 not in IGNORED_ALGS:
+      TALG[2][j] = float(totals_j[-1])
     
-    opt_best, opt_best_point, max_seq = ALPHAOPT(current_comms_uniform[j],current_comps_local[j],current_comps_remote)
-    
-    alg_best12, c_cut12, alg_best2_point, counter = DOPart(current_comms_uniform[j],current_comps_local[j],current_comps_remote, a, b,0)
-    alg_best5, c_cut5, alg_best5_point = DOPartRAND(current_comms_uniform[j],current_comps_local[j],current_comps_remote, a, b) #USED
-    alg_best6, c_cut6, alg_best6_point = DOPartRANDR(current_comms_uniform[j],current_comps_local[j],current_comps_remote, a, b) #USED
-    alg_best7, c_cut7, alg_best7_point = DOPartARAND(current_comms_uniform[j],current_comps_local[j],current_comps_remote, a, b) #USED
-    alg_best8, c_cut8, alg_best8_point = DOPartARANDR(current_comms_uniform[j],current_comps_local[j],current_comps_remote, a, b) #USED
-    alg_best9, c_cut9, alg_best9_point = TBP(current_comms_uniform[j],current_comps_local[j],current_comps_remote, a, b,ratio) #USED
-    
-    alg_best2 = sum(current_comps_local[j][:0]) + current_comms_uniform[j][0] + sum(current_comps_remote[0:])
-    alg_best3 = sum(current_comps_local[j][:len(current_comps_local[j])]) + current_comms_uniform[j][len(current_comps_local[j])] + sum(current_comps_remote[len(current_comps_local[j]):])
+    alg_best12, _, _, _ = DOPart(comms_j, local_j, current_comps_remote, a, b, 0)
+    alg_best5, _, _ = DOPartRAND(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
+    alg_best7, _, _ = DOPartARAND(comms_j, local_j, current_comps_remote, a, b) #USED
+    alg_best9, _, _ = TBP(comms_j, local_j, current_comps_remote, a, b, ratio) #USED
 
-
-    TALG[0].append(alg_best11)
-    TALG[1].append(alg_best12)
-    TALG[2].append(alg_best13)
-    TALG[3].append(alg_best2)
-    TALG[4].append(alg_best3)
-    TALG[5].append(alg_best5)
-    TALG[6].append(alg_best6)
-    TALG[7].append(alg_best7)
-    TALG[8].append(alg_best8)
-    TALG[9].append(alg_best9)
-    TALG[10].append(opt_best)
+    if 6 not in IGNORED_ALGS:
+      TALG[6][j], _, _ = DOPartRANDR(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
+    if 8 not in IGNORED_ALGS:
+      TALG[8][j], _, _ = DOPartARANDR(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
+    
+    TALG[1][j] = alg_best12
+    TALG[3][j] = float(totals_j[0])
+    TALG[4][j] = float(totals_j[-1])
+    TALG[5][j] = alg_best5
+    TALG[7][j] = alg_best7
+    TALG[9][j] = alg_best9
+    TALG[10][j] = opt_best
   return (TALG)
 
 # if v!=0:
@@ -160,17 +148,25 @@ for i in range(len(alphas)):
   for j in range(len(TALG)):
     TALG_final[j].append(TALG[j])
 
-ignore = [0,2,6,8]
-compiled = []
+ignore = sorted(IGNORED_ALGS)
+compiled_frames = []
+alpha_values = np.asarray(alphas, dtype=float)
 
 for k in range(len(algs)):
   print("Processing Algorithm:",algs[k])
   if k not in ignore:
-    for i in range(len(alphas)):
-        for j in range(7000):
-          compiled.append([TALG_final[k][i][j], alphas[i], algs[k]])
+    values = np.asarray(TALG_final[k], dtype=float).reshape(-1)
+    compiled_frames.append(
+      pd.DataFrame(
+        {
+          "Average Makespan": values,
+          "Alpha": np.repeat(alpha_values, NUM_SAMPLES),
+          "Alg": algs[k],
+        }
+      )
+    )
 
-df_main1 = pd.DataFrame(compiled, columns = ['Average Makespan', 'Alpha', 'Alg'])
+df_main1 = pd.concat(compiled_frames, ignore_index=True)
 df_main1["Average Makespan"] = df_main1["Average Makespan"].div(0.001)
 sns.set(rc={'figure.figsize':(6,3)})
 plt.rcParams["figure.figsize"] = [6,3]
@@ -189,8 +185,22 @@ for i in algs:
 
 d_style[algs[-1]] = (5, 10)
 
-h = sns.lineplot(x="Alpha",y="Average Makespan", hue="Alg", data=df_main1,style="Alg",linewidth=1, palette=['g', 'black','b','r','magenta', 'orange', 'cyan'],
-    markers=True, dashes=d_style, markersize=8, err_style="band", err_kws={'alpha':0.1}) #NEWDOPartRAND
+lineplot_kwargs = dict(
+  x="Alpha",
+  y="Average Makespan",
+  hue="Alg",
+  data=df_main1,
+  style="Alg",
+  linewidth=1,
+  palette=['g', 'black','b','r','magenta', 'orange', 'cyan'],
+  markers=True,
+  dashes=d_style,
+  markersize=8,
+)
+try:
+  h = sns.lineplot(errorbar=None, **lineplot_kwargs)
+except TypeError:
+  h = sns.lineplot(ci=None, **lineplot_kwargs)
 h.set_xticks(alphas) # <--- set the ticks first
 
 if alpha_fixed:
@@ -235,8 +245,15 @@ ax.grid(True)
 [x.set_linewidth(0.5) for x in ax.spines.values()]
 
 ts = datetime.now().strftime("%Y-%b-%d_%H-%M-%S")
-out_path = fr"C:\Users\shiva\Dropbox\shared\DOPart\Randomized\Experiments\DOPart_Randomized_{ts}.pdf"
-plt.savefig(out_path, bbox_inches="tight")
+out_path = Path(
+  fr"C:\Users\shiva\Dropbox\shared\DOPart\Randomized\Experiments\DOPart_Randomized_{ts}.pdf"
+)
+try:
+  out_path.parent.mkdir(parents=True, exist_ok=True)
+  plt.savefig(out_path, bbox_inches="tight")
+except OSError:
+  fallback_path = Path.cwd() / f"DOPart_Randomized_{ts}.pdf"
+  plt.savefig(fallback_path, bbox_inches="tight")
 
 plt.show()
 
