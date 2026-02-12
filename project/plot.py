@@ -9,17 +9,22 @@ from data_generation import system_values
 from methods import TBP, DOPart, DOPartARAND, DOPartARANDR, DOPartRAND, DOPartRANDR, TBP_ratio, rand_threshold_params
 import argparse
 
+from findCommsRange import commsRange
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--stages", type=int, default=0)
 
 # booleans
 parser.add_argument("--comms-uniform", action=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--log-uniform", action=argparse.BooleanOptionalAction, default=False)
+parser.add_argument("--random-min", action=argparse.BooleanOptionalAction, default=False)
 
 # floats
 parser.add_argument("--alpha-min", type=float, default=1.0)
 parser.add_argument("--alpha-max", type=float, default=4.0)
+parser.add_argument("--period", type=float, default=0.5)
 parser.add_argument("--alpha-fixed", action=argparse.BooleanOptionalAction, default=True)
+parser.add_argument("--comms-range-factor", type=int, default=1)
 parser.add_argument("--lower-bound", type=float, default=0.25)
 parser.add_argument("--upper-bound", type=float, default=2.5)
 
@@ -31,12 +36,15 @@ v = args.stages
 comms_uniform = args.comms_uniform
 lb = args.lower_bound
 ub = args.upper_bound
+comms_range_factor = args.comms_range_factor
 log_uniform = args.log_uniform
 alpha_fixed = args.alpha_fixed
 alpha_min = args.alpha_min
 alpha_max = args.alpha_max
+period = args.period
+random_min = args.random_min
 
-alphas = [alpha_min + 0.5*i for i in range(int(round((alpha_max-alpha_min)/0.5))+1)]
+alphas = [alpha_min + period*i for i in range(int(round((alpha_max-alpha_min)/period))+1)]
 algs = ["AutoNeuro", "DOPart", "Neuro", "Remote Only", "Local Only", "DOPart-R", "DOPart-DR", "DOPart-AR", "DOPart-DAR", "Threat Based", "OPT"]
 print(alphas)
 current_comps_remote, input_data_real = system_values(v)
@@ -44,6 +52,9 @@ current_comps_remote = np.asarray(current_comps_remote, dtype=float)
 input_data_real = np.asarray(input_data_real, dtype=float)
 
 print(len(current_comps_remote))
+
+if comms_range_factor == 1:
+  lb, ub = commsRange(alpha_min, alpha_max,log_uniform=log_uniform, alpha_fixed=alpha_fixed) 
 
 def genAlphas(a,b,size):
     if not log_uniform:
@@ -54,6 +65,8 @@ def genAlphas(a,b,size):
 def generateSamples(i):
   local_alpha_min = alpha_min
   local_alpha_max = alpha_max
+  local_lb = lb
+  local_ub = ub
 
   if alpha_fixed:
     local_alpha_max = alphas[i]
@@ -67,7 +80,10 @@ def generateSamples(i):
     b = local_alpha_max
     a = local_alpha_min
 
-  a = min(a,1)
+  if comms_range_factor == 2:
+    local_lb, local_ub = commsRange(alpha_min, alpha_max,log_uniform=log_uniform, alpha_fixed=alpha_fixed) 
+
+  
   n_layers = current_comps_remote.size
 
   TALG = [np.zeros(NUM_SAMPLES, dtype=float) for _ in range(len(algs))]
@@ -79,7 +95,7 @@ def generateSamples(i):
   bandwidth=input_data_real[0]/Rl
 
   if not comms_uniform:
-    rb = bandwidth * lb + np.random.random((NUM_SAMPLES, n_layers)) * bandwidth * ub
+    rb = bandwidth * local_lb + np.random.random((NUM_SAMPLES, n_layers)) * bandwidth * local_ub
     comms_body = input_data_real / rb
   else:
     comms_body = (a - 1 + np.random.random((NUM_SAMPLES, n_layers)) * (b - a)) * Rl
@@ -98,7 +114,10 @@ def generateSamples(i):
     ANeuro_best_point = int(np.argmin(makespan))
   else:
     ANeuro_best_point = 0
-  
+
+  if random_min:
+    a = min(a,1)
+
   ratio = TBP_ratio(a,b,current_comms_uniform.shape[1])
   rand_params = rand_threshold_params(a, b)
 
@@ -131,7 +150,10 @@ def generateSamples(i):
     TALG[7][j] = alg_best7
     TALG[9][j] = alg_best9
     TALG[10][j] = opt_best
+  print("Alpha: ", alphas[i],"Average local computation delay:", makespan_matrix.mean(axis=0)[-1]/sum(current_comps_remote), "Average remote computation delay:", makespan_matrix.mean(axis=0)[0]/sum(current_comps_remote))
   return (TALG)
+
+
 
 # if v!=0:
 #   log_uniform = False
