@@ -1,0 +1,54 @@
+DOPart: Current Behavior and System Model
+
+What DOPart currently does
+- DOPart currently operates as an experiment/simulation pipeline for DNN partition policies, not as an online deployment runtime.
+- Main driver: project/plot.py.
+- It sweeps an alpha axis (alpha_min to alpha_max with step period), and for each alpha point generates 7000 random samples.
+- For each sample, it builds:
+  - Local compute times by scaling per-layer remote times with sampled alpha values.
+  - Communication delays by combining activation/input sizes with sampled bandwidth values.
+- It evaluates multiple algorithms per sample, including:
+  - DOPart (deterministic threshold)
+  - DOPart-R (single random threshold)
+  - DOPart-DR (fresh random threshold each step)
+  - DOPart-AR (adaptive randomized threshold)
+  - DOPart-DAR (currently aliased to DOPart-DR in code)
+  - Threat Based (TBP)
+  - OPT baseline (best split in hindsight)
+- It aggregates average makespan across samples and plots Average Makespan vs Alpha, then saves a PDF figure.
+- Some algorithms are intentionally ignored via IGNORED_ALGS = {0, 2, 6, 8} to reduce runtime in current experiments.
+
+System model of the problem
+- The model is single-cut DNN partitioning over a sequential layer stack.
+- Decision variable: choose one split index i.
+  - Layers before i execute locally.
+  - Layers from i onward execute remotely.
+  - A single communication transfer cost is paid at i.
+
+Latency model
+- Total latency for split i is modeled as:
+  T_i = sum_{k < i}(L_k) + C_i + sum_{k >= i}(R_k)
+
+Where:
+- L_k: local compute time of layer k.
+- R_k: remote compute time of layer k.
+- C_i: communication time if partition occurs at i.
+
+How model values are generated in current code
+- Remote profile R_k for stage 0 is taken from profiled ResNet data in resnet34_compute_values_224_t4.npy (mean over selected samples).
+- Local profile L_k is generated as alpha_k * R_k, where alpha_k is sampled from either uniform or log-uniform ranges controlled by CLI arguments.
+- Communication is generated from layer input/activation size and sampled bandwidth.
+
+Optimization objective
+- Minimize makespan T_i.
+- OPT gives the best offline split (minimum over all i for each sample).
+- DOPart and its randomized/adaptive variants are online threshold policies that decide when to stop and offload under uncertainty.
+
+Current interpretation
+- Practically, the repository models the partition decision as an online-search/one-way-trading style stopping problem applied to DNN split selection, under uncertainty in local compute scaling and communication conditions.
+
+Key file map
+- project/plot.py: experiment driver, sampling, metric aggregation, plotting.
+- project/methods.py: DOPart and baseline policy implementations.
+- project/data_generation.py: stage-specific compute/input profiles.
+- project/findCommsRange.py: helper for communication-range calibration.
