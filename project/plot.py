@@ -27,10 +27,33 @@ parser.add_argument("--alpha-fixed", action=argparse.BooleanOptionalAction, defa
 parser.add_argument("--comms-range-factor", type=int, default=1)
 parser.add_argument("--lower-bound", type=float, default=0.25)
 parser.add_argument("--upper-bound", type=float, default=2.5)
+parser.add_argument(
+  "--stage-plots",
+  action=argparse.BooleanOptionalAction,
+  default=False,
+  help="Generate stage-latency and stage-input-size plots from imported profile data.",
+)
+parser.add_argument(
+  "--stage-plots-only",
+  action=argparse.BooleanOptionalAction,
+  default=False,
+  help="Generate only stage profile plots and exit before algorithm simulation.",
+)
+parser.add_argument(
+  "--stage-plot-out-dir",
+  type=str,
+  default=str(Path(__file__).resolve().parent / "plots"),
+  help="Directory for stage profile plots.",
+)
+parser.add_argument(
+  "--no-show",
+  action="store_true",
+  help="Disable interactive plot windows.",
+)
 
 args = parser.parse_args()
 NUM_SAMPLES = 7000
-IGNORED_ALGS = {0, 2, 6, 8}
+IGNORED_ALGS = {0, 2, 6, 7, 8, 9}
 
 v = args.stages
 comms_uniform = args.comms_uniform
@@ -43,6 +66,56 @@ alpha_min = args.alpha_min
 alpha_max = args.alpha_max
 period = args.period
 random_min = args.random_min
+stage_plots = args.stage_plots or args.stage_plots_only
+stage_plot_out_dir = Path(args.stage_plot_out_dir).resolve()
+
+
+def _stage_tick_positions(n_stages: int) -> np.ndarray:
+  tick_step = max(1, n_stages // 20)
+  ticks = np.arange(1, n_stages + 1, tick_step, dtype=int)
+  if ticks[-1] != n_stages:
+    ticks = np.append(ticks, n_stages)
+  return ticks
+
+
+def plot_stage_profiles(
+  comps_remote_ms: np.ndarray,
+  stage_input_bytes: np.ndarray,
+  out_dir: Path,
+  stage_tag: str,
+) -> tuple[Path, Path]:
+  out_dir.mkdir(parents=True, exist_ok=True)
+  n_stages = int(comps_remote_ms.size)
+  stage_idx = np.arange(1, n_stages + 1, dtype=int)
+  xticks = _stage_tick_positions(n_stages)
+
+  sns.set_theme(style="whitegrid", font_scale=0.8)
+
+  fig_latency, ax_latency = plt.subplots(figsize=(11, 3.5))
+  ax_latency.plot(stage_idx, comps_remote_ms, marker="o", linewidth=1.2, markersize=2.2, color="tab:blue")
+  ax_latency.set_title(f"Per-Stage Latency ({stage_tag})")
+  ax_latency.set_xlabel("Stage Index")
+  ax_latency.set_ylabel("Latency [ms]")
+  ax_latency.set_xticks(xticks)
+  ax_latency.grid(True, alpha=0.35)
+  fig_latency.tight_layout()
+
+  latency_path = out_dir / f"{stage_tag}_stage_latency_ms.png"
+  fig_latency.savefig(latency_path, dpi=180, bbox_inches="tight")
+
+  fig_size, ax_size = plt.subplots(figsize=(11, 3.5))
+  input_size_mb = stage_input_bytes / (1024.0 * 1024.0)
+  ax_size.plot(stage_idx, input_size_mb, marker="o", linewidth=1.2, markersize=2.2, color="tab:green")
+  ax_size.set_title(f"Per-Stage Input Size ({stage_tag})")
+  ax_size.set_xlabel("Stage Index")
+  ax_size.set_ylabel("Input Size [MiB]")
+  ax_size.set_xticks(xticks)
+  ax_size.grid(True, alpha=0.35)
+  fig_size.tight_layout()
+
+  input_size_path = out_dir / f"{stage_tag}_stage_input_size_mib.png"
+  fig_size.savefig(input_size_path, dpi=180, bbox_inches="tight")
+  return latency_path, input_size_path
 
 alphas = [alpha_min + period*i for i in range(int(round((alpha_max-alpha_min)/period))+1)]
 algs = ["AutoNeuro", "DOPart", "Neuro", "Remote Only", "Local Only", "DOPart-R", "DOPart-DR", "DOPart-AR", "DOPart-DAR", "Threat Based", "OPT"]
@@ -52,6 +125,23 @@ current_comps_remote = np.asarray(current_comps_remote, dtype=float)
 input_data_real = np.asarray(input_data_real, dtype=float)
 
 print(len(current_comps_remote))
+
+if stage_plots:
+  stage_tag = "resnet152" if v == 152 else "resnet200" if v == 200 else f"stages_{v}"
+  latency_path, input_size_path = plot_stage_profiles(
+    current_comps_remote,
+    input_data_real,
+    stage_plot_out_dir,
+    stage_tag,
+  )
+  print(f"Saved stage latency plot: {latency_path}")
+  print(f"Saved stage input-size plot: {input_size_path}")
+  if args.stage_plots_only:
+    if not args.no_show:
+      plt.show()
+    else:
+      plt.close("all")
+    raise SystemExit(0)
 
 if comms_range_factor == 1:
   lb, ub = commsRange(alpha_min, alpha_max,log_uniform=log_uniform, alpha_fixed=alpha_fixed) 
@@ -277,6 +367,9 @@ except OSError:
   fallback_path = Path.cwd() / f"DOPart_Randomized_{ts}.pdf"
   plt.savefig(fallback_path, bbox_inches="tight")
 
-plt.show()
+if not args.no_show:
+  plt.show()
+else:
+  plt.close("all")
 
 #  python .\project\plot.py --stages 0 --no-comms-uniform --log-uniform --alpha-min 0 --alpha-max 2.5 --alpha-fixed --lower-bound 0.25 --upper-bound 2.5
