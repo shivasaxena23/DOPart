@@ -17,7 +17,7 @@ parser.add_argument("--stages", type=int, default=0)
 # booleans
 parser.add_argument("--comms-uniform", action=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--log-uniform", action=argparse.BooleanOptionalAction, default=False)
-parser.add_argument("--random-min", action=argparse.BooleanOptionalAction, default=False)
+parser.add_argument("--random-min", action=argparse.BooleanOptionalAction, default=True)
 
 # floats
 parser.add_argument("--alpha-min", type=float, default=1.0)
@@ -53,7 +53,7 @@ parser.add_argument(
 
 args = parser.parse_args()
 NUM_SAMPLES = 7000
-IGNORED_ALGS = {0, 2, 6, 7, 8, 9}
+IGNORED_ALGS = {0, 2, 6, 7}
 
 v = args.stages
 comms_uniform = args.comms_uniform
@@ -66,6 +66,7 @@ alpha_min = args.alpha_min
 alpha_max = args.alpha_max
 period = args.period
 random_min = args.random_min
+print("Random min:", random_min)
 stage_plots = args.stage_plots or args.stage_plots_only
 stage_plot_out_dir = Path(args.stage_plot_out_dir).resolve()
 

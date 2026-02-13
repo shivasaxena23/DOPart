@@ -169,7 +169,6 @@ def DOPartARANDR(current_comms_uniform, current_comps_local, current_comps_remot
   )
 
 def TBP_ratio(r,R,n):
-  print("R: ", R, "r: ", r)
   r = min(r,1)
 
   if r == R:
