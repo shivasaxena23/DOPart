@@ -1,6 +1,7 @@
 from datetime import datetime
 import math
 from pathlib import Path
+import random
 import seaborn as sns
 from matplotlib import pyplot as plt
 import numpy as np
@@ -57,6 +58,12 @@ parser.add_argument(
   default=0.0,
   help="Confidence interval level for seaborn lineplot (e.g., 95). Use 0 to disable.",
 )
+parser.add_argument(
+  "--seed",
+  type=int,
+  default=None,
+  help="Random seed for reproducible sampling and CI bootstrapping.",
+)
 
 args = parser.parse_args()
 NUM_SAMPLES = 7000
@@ -75,7 +82,12 @@ alpha_max = args.alpha_max
 period = args.period
 random_min = args.random_min
 ci_level = args.ci
+seed = args.seed
 print("Random min:", random_min)
+if seed is not None:
+  np.random.seed(seed)
+  random.seed(seed)
+  print("Seed:", seed)
 stage_plots = args.stage_plots or args.stage_plots_only
 stage_plot_out_dir = Path(args.stage_plot_out_dir).resolve()
 
@@ -318,6 +330,7 @@ lineplot_kwargs = dict(
   markers=True,
   dashes=d_style,
   markersize=8,
+  seed=seed,
 )
 ci_enabled = ci_level > 0
 try:
@@ -357,6 +370,7 @@ cmd_parts = [
   f"lower_bound={lb}",
   f"upper_bound={ub}",
   f"ci={ci_level}",
+  f"seed={seed}",
 ]
 fig.text(
   0.01, 0.01,
