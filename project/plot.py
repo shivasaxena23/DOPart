@@ -25,6 +25,7 @@ parser.add_argument("--alpha-max", type=float, default=4.0)
 parser.add_argument("--period", type=float, default=0.5)
 parser.add_argument("--alpha-fixed", action=argparse.BooleanOptionalAction, default=True)
 parser.add_argument("--comms-range-factor", type=int, default=1)
+parser.add_argument("--mid-scale", type=float, default=1)
 parser.add_argument("--lower-bound", type=float, default=0.25)
 parser.add_argument("--upper-bound", type=float, default=2.5)
 parser.add_argument(
@@ -50,22 +51,30 @@ parser.add_argument(
   action="store_true",
   help="Disable interactive plot windows.",
 )
+parser.add_argument(
+  "--ci",
+  type=float,
+  default=0.0,
+  help="Confidence interval level for seaborn lineplot (e.g., 95). Use 0 to disable.",
+)
 
 args = parser.parse_args()
 NUM_SAMPLES = 7000
-IGNORED_ALGS = {0, 2, 6, 7}
+IGNORED_ALGS = {0, 2, 6, 8}
 
 v = args.stages
 comms_uniform = args.comms_uniform
 lb = args.lower_bound
 ub = args.upper_bound
 comms_range_factor = args.comms_range_factor
+mid_scale = args.mid_scale
 log_uniform = args.log_uniform
 alpha_fixed = args.alpha_fixed
 alpha_min = args.alpha_min
 alpha_max = args.alpha_max
 period = args.period
 random_min = args.random_min
+ci_level = args.ci
 print("Random min:", random_min)
 stage_plots = args.stage_plots or args.stage_plots_only
 stage_plot_out_dir = Path(args.stage_plot_out_dir).resolve()
@@ -145,7 +154,7 @@ if stage_plots:
     raise SystemExit(0)
 
 if comms_range_factor == 1:
-  lb, ub = commsRange(alpha_min, alpha_max,log_uniform=log_uniform, alpha_fixed=alpha_fixed) 
+  lb, ub = commsRange(alpha_min, alpha_max, log_uniform, alpha_fixed, mid_scale) 
 
 def genAlphas(a,b,size):
     if not log_uniform:
@@ -310,10 +319,17 @@ lineplot_kwargs = dict(
   dashes=d_style,
   markersize=8,
 )
+ci_enabled = ci_level > 0
 try:
-  h = sns.lineplot(errorbar=None, **lineplot_kwargs)
+  if ci_enabled:
+    h = sns.lineplot(errorbar=("ci", ci_level), **lineplot_kwargs)
+  else:
+    h = sns.lineplot(errorbar=None, **lineplot_kwargs)
 except TypeError:
-  h = sns.lineplot(ci=None, **lineplot_kwargs)
+  if ci_enabled:
+    h = sns.lineplot(ci=ci_level, **lineplot_kwargs)
+  else:
+    h = sns.lineplot(ci=None, **lineplot_kwargs)
 h.set_xticks(alphas) # <--- set the ticks first
 
 if alpha_fixed:
@@ -340,6 +356,7 @@ cmd_parts = [
   f"alpha_fixed={alpha_fixed}",
   f"lower_bound={lb}",
   f"upper_bound={ub}",
+  f"ci={ci_level}",
 ]
 fig.text(
   0.01, 0.01,

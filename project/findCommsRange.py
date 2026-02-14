@@ -5,7 +5,7 @@ f = lambda r,R: (math.pow(2,R)-math.pow(2,r))/(math.log(2)*(R-r))
 g = lambda l, u: 1+ math.log(1+u/l)/(u)
 
 
-def commsRange(r,R,log_uniform=True, alpha_fixed=False):
+def commsRange(r,R,log_uniform, alpha_fixed, mid_scale):
 
     if alpha_fixed:
         r, R = R, r
@@ -18,15 +18,17 @@ def commsRange(r,R,log_uniform=True, alpha_fixed=False):
     else:
         mid = (r + 3*R)/4    
 
-    print(mid)
+    mid = mid * mid_scale
+    
     if mid > 1:
         
         l_best = 0.0001
         u_best = 0.0001
         diff = float("inf")
-        for i in range(100000):
-            u = random.uniform(0.0001, 100)
-            l = random.uniform(0.0001, u)
+        for i in range(10000000):
+            x = random.uniform(0.0001, 5)
+            y = random.uniform(0.0001, 5)
+            l, u = sorted((x, y))
             if abs(g(l,u)-mid) < diff:
                 diff = abs(g(l,u)-mid)
                 l_best = l
