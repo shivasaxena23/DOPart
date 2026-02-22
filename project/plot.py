@@ -31,6 +31,12 @@ parser.add_argument(
 parser.add_argument("--comms-uniform", action=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--log-uniform", action=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--random-min", action=argparse.BooleanOptionalAction, default=True)
+parser.add_argument(
+  "--offload-plot",
+  action=argparse.BooleanOptionalAction,
+  default=True,
+  help="Generate an additional plot of offload layer indices per algorithm.",
+)
 
 # floats
 parser.add_argument("--alpha-min", type=float, default=1.0)
@@ -93,6 +99,7 @@ alpha_min = args.alpha_min
 alpha_max = args.alpha_max
 period = args.period
 random_min = args.random_min
+offload_plot = args.offload_plot
 ci_level = args.ci
 seed = args.seed
 profile_model = args.profile_model
@@ -217,6 +224,7 @@ def generateSamples(i):
   n_layers = current_comps_remote.size
 
   TALG = [np.zeros(NUM_SAMPLES, dtype=float) for _ in range(len(algs))]
+  TOFF = [np.zeros(NUM_SAMPLES, dtype=float) for _ in range(len(algs))]
 
   alpha_scales = genAlphas(local_alpha_min, local_alpha_max, size=(NUM_SAMPLES, n_layers))
   current_comps_local = alpha_scales * current_comps_remote
@@ -257,31 +265,43 @@ def generateSamples(i):
     totals_j = makespan_matrix[j]
 
     opt_best = float(np.min(totals_j))
+    opt_idx = int(np.argmin(totals_j))
     
     if 0 not in IGNORED_ALGS:
       TALG[0][j] = float(totals_j[ANeuro_best_point])
+    TOFF[0][j] = float(ANeuro_best_point)
     if 2 not in IGNORED_ALGS:
       TALG[2][j] = float(totals_j[-1])
+    TOFF[2][j] = float(n_layers)
     
-    alg_best12, _, _, _ = DOPart(comms_j, local_j, current_comps_remote, a, b, 0)
-    alg_best5, _, _ = DOPartRAND(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
-    alg_best7, _, _ = DOPartARAND(comms_j, local_j, current_comps_remote, a, b) #USED
-    alg_best9, _, _ = TBP(comms_j, local_j, current_comps_remote, a, b, ratio) #USED
+    alg_best12, _, idx12, _ = DOPart(comms_j, local_j, current_comps_remote, a, b, 0)
+    alg_best5, _, idx5 = DOPartRAND(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
+    alg_best7, _, idx7 = DOPartARAND(comms_j, local_j, current_comps_remote, a, b) #USED
+    alg_best9, _, idx9 = TBP(comms_j, local_j, current_comps_remote, a, b, ratio) #USED
 
     if 6 not in IGNORED_ALGS:
-      TALG[6][j], _, _ = DOPartRANDR(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
+      TALG[6][j], _, idx6 = DOPartRANDR(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
+      TOFF[6][j] = float(idx6)
     if 8 not in IGNORED_ALGS:
-      TALG[8][j], _, _ = DOPartARANDR(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
+      TALG[8][j], _, idx8 = DOPartARANDR(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
+      TOFF[8][j] = float(idx8)
     
     TALG[1][j] = alg_best12
+    TOFF[1][j] = float(idx12)
     TALG[3][j] = float(totals_j[0])
+    TOFF[3][j] = 0.0
     TALG[4][j] = float(totals_j[-1])
+    TOFF[4][j] = float(n_layers)
     TALG[5][j] = alg_best5
+    TOFF[5][j] = float(idx5)
     TALG[7][j] = alg_best7
+    TOFF[7][j] = float(idx7)
     TALG[9][j] = alg_best9
+    TOFF[9][j] = float(idx9)
     TALG[10][j] = opt_best
+    TOFF[10][j] = float(opt_idx)
   print("Alpha: ", alphas[i],"Average local computation delay:", makespan_matrix.mean(axis=0)[-1]/sum(current_comps_remote), "Average remote computation delay:", makespan_matrix.mean(axis=0)[0]/sum(current_comps_remote))
-  return (TALG)
+  return TALG, TOFF
 
 
 
@@ -292,27 +312,42 @@ def generateSamples(i):
 #   log_uniform = True
 #   comms_uniform = False
 
-TALG_final = [[] for _ in range(len(algs))] 
+TALG_final = [[] for _ in range(len(algs))]
+TOFF_final = [[] for _ in range(len(algs))]
 
 for i in range(len(alphas)):
-  TALG = generateSamples(i)
+  TALG, TOFF = generateSamples(i)
   print(f"Completed for alpha value = {alphas[i]}")
   for j in range(len(TALG)):
     TALG_final[j].append(TALG[j])
+    TOFF_final[j].append(TOFF[j])
 
 ignore = sorted(IGNORED_ALGS)
+active_algs = [algs[k] for k in range(len(algs)) if k not in ignore]
 compiled_frames = []
+offload_frames = []
 alpha_values = np.asarray(alphas, dtype=float)
 
 for k in range(len(algs)):
   print("Processing Algorithm:",algs[k])
   if k not in ignore:
     values = np.asarray(TALG_final[k], dtype=float).reshape(-1)
+    offload_idx = np.asarray(TOFF_final[k], dtype=float).reshape(-1)
+    alpha_repeated = np.repeat(alpha_values, NUM_SAMPLES)
     compiled_frames.append(
       pd.DataFrame(
         {
           "Average Makespan": values,
-          "Alpha": np.repeat(alpha_values, NUM_SAMPLES),
+          "Alpha": alpha_repeated,
+          "Alg": algs[k],
+        }
+      )
+    )
+    offload_frames.append(
+      pd.DataFrame(
+        {
+          "Offload Layer": offload_idx,
+          "Alpha": alpha_repeated,
           "Alg": algs[k],
         }
       )
@@ -320,6 +355,7 @@ for k in range(len(algs)):
 
 df_main1 = pd.concat(compiled_frames, ignore_index=True)
 df_main1["Average Makespan"] = df_main1["Average Makespan"].div(0.001)
+df_offload = pd.concat(offload_frames, ignore_index=True)
 sns.set(rc={'figure.figsize':(6,3)})
 plt.rcParams["figure.figsize"] = [6,3]
 plt.rcParams["figure.autolayout"] = True
@@ -328,56 +364,71 @@ plt.rcParams["figure.autolayout"] = True
 
 sns.set_theme(font_scale=0.7, style='white')
 
-fig, ax = plt.subplots()
-
-
-d_style = {}
-for i in algs:
-  d_style[i]=''
-
+d_style = {alg: "" for alg in algs}
 d_style[algs[-1]] = (5, 10)
+palette = sns.color_palette("tab10", n_colors=max(1, len(active_algs)))
 
-lineplot_kwargs = dict(
+
+def _lineplot_with_ci(ax, lineplot_kwargs):
+  ci_enabled = ci_level > 0
+  try:
+    if ci_enabled:
+      return sns.lineplot(ax=ax, errorbar=("ci", ci_level), **lineplot_kwargs)
+    return sns.lineplot(ax=ax, errorbar=None, **lineplot_kwargs)
+  except TypeError:
+    if ci_enabled:
+      return sns.lineplot(ax=ax, ci=ci_level, **lineplot_kwargs)
+    return sns.lineplot(ax=ax, ci=None, **lineplot_kwargs)
+
+
+def _set_alpha_xlabel(h):
+  if alpha_fixed:
+    if log_uniform:
+      h.set_xlabel(r'$\log_2\alpha$' + r'$_\mathregular{max}$')
+    else:
+      h.set_xlabel(r'$\alpha$' + r'$_\mathregular{max}$')
+  else:
+    if log_uniform:
+      h.set_xlabel(r'$\log_2\alpha$' + r'$_\mathregular{min}$')
+    else:
+      h.set_xlabel(r'$\alpha$' + r'$_\mathregular{min}$')
+
+
+def _style_legend(ax):
+  handles, labels = ax.get_legend_handles_labels()
+  if len(handles) >= 2:
+    handles[0], handles[1] = handles[1], handles[0]
+    labels[0], labels[1] = labels[1], labels[0]
+  ax.legend(handles=handles, labels=labels)
+
+
+# Main makespan plot.
+fig_main, ax_main = plt.subplots()
+lineplot_kwargs_main = dict(
   x="Alpha",
   y="Average Makespan",
   hue="Alg",
   data=df_main1,
   style="Alg",
   linewidth=1,
-  palette=['g', 'black','b','r','magenta', 'orange', 'cyan'],
+  hue_order=active_algs,
+  style_order=active_algs,
+  palette=palette,
   markers=True,
   dashes=d_style,
   markersize=8,
   seed=seed,
 )
-ci_enabled = ci_level > 0
-try:
-  if ci_enabled:
-    h = sns.lineplot(errorbar=("ci", ci_level), **lineplot_kwargs)
-  else:
-    h = sns.lineplot(errorbar=None, **lineplot_kwargs)
-except TypeError:
-  if ci_enabled:
-    h = sns.lineplot(ci=ci_level, **lineplot_kwargs)
-  else:
-    h = sns.lineplot(ci=None, **lineplot_kwargs)
-h.set_xticks(alphas) # <--- set the ticks first
+h_main = _lineplot_with_ci(ax_main, lineplot_kwargs_main)
+h_main.set_xticks(alphas)
+_set_alpha_xlabel(h_main)
+h_main.set_ylabel(r'Average ' + r'$T_\mathregular{ALG}$' + r' [ms]')
+h_main.ticklabel_format(useMathText=True)
+_style_legend(ax_main)
+ax_main.grid(True)
+[x.set_linewidth(0.5) for x in ax_main.spines.values()]
 
-if alpha_fixed:
-  if log_uniform:
-    h.set_xlabel(r'$\log_2\alpha$' + r'$_\mathregular{max}$')
-  else:
-    h.set_xlabel(r'$\alpha$' + r'$_\mathregular{max}$')
-else:
-  if log_uniform:
-    h.set_xlabel(r'$\log_2\alpha$' + r'$_\mathregular{min}$')
-  else:
-    h.set_xlabel(r'$\alpha$' + r'$_\mathregular{min}$')
-
-h.set_ylabel(r'Average ' + r'$T_\mathregular{ALG}$' + r' [ms]')
-h.ticklabel_format(useMathText=True)
-
-# Add command-line parameters to the figure.
+# Add command-line parameters to the figures.
 cmd_parts = [
   f"stages={v}",
   f"profile_model={profile_model}",
@@ -390,8 +441,9 @@ cmd_parts = [
   f"upper_bound={ub}",
   f"ci={ci_level}",
   f"seed={seed}",
+  f"offload_plot={offload_plot}",
 ]
-fig.text(
+fig_main.text(
   0.01, 0.01,
   "Args: " + ", ".join(cmd_parts),
   ha="left",
@@ -399,24 +451,59 @@ fig.text(
   fontsize=7,
 )
 
-handles, labels = ax.get_legend_handles_labels()
-handles[0], handles[1] = handles[1], handles[0]
-labels[0], labels[1] = labels[1], labels[0]
-ax.legend(handles=handles[0:], labels=labels[0:])
-ax.grid(True)
-
-[x.set_linewidth(0.5) for x in ax.spines.values()]
+fig_offload = None
+if offload_plot:
+  fig_offload, ax_offload = plt.subplots()
+  lineplot_kwargs_offload = dict(
+    x="Alpha",
+    y="Offload Layer",
+    hue="Alg",
+    data=df_offload,
+    style="Alg",
+    linewidth=1,
+    hue_order=active_algs,
+    style_order=active_algs,
+    palette=palette,
+    markers=True,
+    dashes=d_style,
+    markersize=8,
+    seed=seed,
+  )
+  h_offload = _lineplot_with_ci(ax_offload, lineplot_kwargs_offload)
+  h_offload.set_xticks(alphas)
+  _set_alpha_xlabel(h_offload)
+  h_offload.set_ylabel("Offload Layer Index")
+  max_layer_idx = int(current_comps_remote.size)
+  h_offload.set_ylim(-0.5, max_layer_idx + 0.5)
+  ytick_step = max(1, max_layer_idx // 10)
+  offload_ticks = np.arange(0, max_layer_idx + 1, ytick_step, dtype=int)
+  if offload_ticks[-1] != max_layer_idx:
+    offload_ticks = np.append(offload_ticks, max_layer_idx)
+  h_offload.set_yticks(offload_ticks)
+  _style_legend(ax_offload)
+  ax_offload.grid(True)
+  [x.set_linewidth(0.5) for x in ax_offload.spines.values()]
+  fig_offload.text(
+    0.01, 0.01,
+    "Args: " + ", ".join(cmd_parts),
+    ha="left",
+    va="bottom",
+    fontsize=7,
+  )
 
 ts = datetime.now().strftime("%Y-%b-%d_%H-%M-%S")
-out_path = Path(
-  fr"C:\Users\shiva\Dropbox\shared\DOPart\Randomized\Experiments\DOPart_Randomized_{ts}.pdf"
-)
+main_name = f"DOPart_Randomized_{ts}.pdf"
+offload_name = f"DOPart_Randomized_Offload_{ts}.pdf"
+out_dir = Path(fr"C:\Users\shiva\Dropbox\shared\DOPart\Randomized\Experiments")
 try:
-  out_path.parent.mkdir(parents=True, exist_ok=True)
-  plt.savefig(out_path, bbox_inches="tight")
+  out_dir.mkdir(parents=True, exist_ok=True)
+  fig_main.savefig(out_dir / main_name, bbox_inches="tight")
+  if fig_offload is not None:
+    fig_offload.savefig(out_dir / offload_name, bbox_inches="tight")
 except OSError:
-  fallback_path = Path.cwd() / f"DOPart_Randomized_{ts}.pdf"
-  plt.savefig(fallback_path, bbox_inches="tight")
+  fig_main.savefig(Path.cwd() / main_name, bbox_inches="tight")
+  if fig_offload is not None:
+    fig_offload.savefig(Path.cwd() / offload_name, bbox_inches="tight")
 
 if not args.no_show:
   plt.show()

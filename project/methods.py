@@ -40,7 +40,7 @@ def _rand_threshold_params(r, R):
 
 
 def _sample_threshold(r, R, ep, bound, b):
-  if bound is None or b >= bound:
+  if bound is None:
     return float(R)
   return float(R - (R - r) / math.exp(b * (R - ep) / R))
 
@@ -153,14 +153,10 @@ def DOPartARAND(current_comms_uniform, current_comps_local, current_comps_remote
       else:
         al = alM / alm
         ep = float((-alM * lambertw((1 / (al * e)) - (1 / e))).real)
-        bound = float((-alM / (alM - ep)) * math.log(ep / (alM - alm)))
-        if b >= bound:
-          thresh = alM
-        else:
-          thresh = float(alM - (alM - alm) / math.exp(b * (alM - ep) / alM))
+        thresh = float(alM - (alM - alm) / math.exp(b * (alM - ep) / alM))
 
       T_i = prefix_i + comms[i] + suffix_i
-      if T_i <= thresh * T_bar and b <= bound: # and T_i <= alM * T_bar / ratio
+      if T_i <= thresh * T_bar: # and T_i <= alM * T_bar / ratio
         return float(T_i), float(comms[i]), i
 
   return float(local_prefix[-1]), 0.0, int(comms.size)
