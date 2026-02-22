@@ -6,6 +6,7 @@ from typing import Callable
 
 import torch
 import torchvision.models as models
+from torch import nn
 from torchvision.models.resnet import Bottleneck, ResNet
 
 
@@ -18,18 +19,59 @@ class StageStat:
     cuda_start_event: torch.cuda.Event | None = None
 
 
+SUPPORTED_MODELS = (
+    "lenet5",
+    "alexnet",
+    "squeezenet1_1",
+    "mobilenet_v3_small",
+    "efficientnet_b0",
+    "shufflenet_v2_x1_0",
+    "mobilenet_v2",
+    "resnet18",
+    "resnet34",
+    "resnet152",
+    "resnet200",
+)
+
+
+class LeNet5(nn.Module):
+    """Compact LeNet-style network with five profiled stages."""
+
+    def __init__(self, num_classes: int = 1000) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 6, kernel_size=5)
+        self.conv2 = nn.Conv2d(6, 16, kernel_size=5)
+        self.pool = nn.AvgPool2d(kernel_size=2, stride=2)
+        self.adapt_pool = nn.AdaptiveAvgPool2d((5, 5))
+        self.fc1 = nn.Linear(16 * 5 * 5, 120)
+        self.fc2 = nn.Linear(120, 84)
+        self.fc3 = nn.Linear(84, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = torch.tanh(self.conv1(x))
+        x = self.pool(x)
+        x = torch.tanh(self.conv2(x))
+        x = self.pool(x)
+        x = self.adapt_pool(x)
+        x = torch.flatten(x, 1)
+        x = torch.tanh(self.fc1(x))
+        x = torch.tanh(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Profile per-stage delay and stage input sizes for ResNet-152 and ResNet-200. "
-            "Stages are residual blocks layer1.0 ... layer4.N."
+            "Profile per-stage delay and stage input sizes for multiple DNN backbones. "
+            "Each model uses block-level stages (e.g., residual blocks, inverted residuals)."
         )
     )
     parser.add_argument(
         "--models",
         nargs="+",
         default=["resnet152", "resnet200"],
-        choices=["resnet152", "resnet200"],
+        choices=SUPPORTED_MODELS,
         help="Models to profile.",
     )
     parser.add_argument("--runs", type=int, default=100, help="Measured forward passes.")
@@ -54,6 +96,24 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_model(name: str) -> torch.nn.Module:
+    if name == "lenet5":
+        return LeNet5(num_classes=1000)
+    if name == "alexnet":
+        return models.alexnet(weights=None)
+    if name == "squeezenet1_1":
+        return models.squeezenet1_1(weights=None)
+    if name == "mobilenet_v3_small":
+        return models.mobilenet_v3_small(weights=None)
+    if name == "efficientnet_b0":
+        return models.efficientnet_b0(weights=None)
+    if name == "shufflenet_v2_x1_0":
+        return models.shufflenet_v2_x1_0(weights=None)
+    if name == "mobilenet_v2":
+        return models.mobilenet_v2(weights=None)
+    if name == "resnet18":
+        return models.resnet18(weights=None)
+    if name == "resnet34":
+        return models.resnet34(weights=None)
     if name == "resnet152":
         return models.resnet152(weights=None)
     if name == "resnet200":
@@ -72,13 +132,98 @@ def choose_device(requested: str) -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def collect_stage_modules(model: torch.nn.Module) -> list[tuple[str, torch.nn.Module]]:
+def collect_resnet_stage_modules(model: torch.nn.Module) -> list[tuple[str, torch.nn.Module]]:
     stage_modules: list[tuple[str, torch.nn.Module]] = []
     for layer_name in ("layer1", "layer2", "layer3", "layer4"):
         layer = getattr(model, layer_name)
         for block_idx, block in enumerate(layer):
             stage_modules.append((f"{layer_name}.{block_idx}", block))
     return stage_modules
+
+
+def collect_lenet5_stage_modules(model: LeNet5) -> list[tuple[str, torch.nn.Module]]:
+    return [
+        ("conv1", model.conv1),
+        ("conv2", model.conv2),
+        ("fc1", model.fc1),
+        ("fc2", model.fc2),
+        ("fc3", model.fc3),
+    ]
+
+
+def collect_alexnet_stage_modules(model: torch.nn.Module) -> list[tuple[str, torch.nn.Module]]:
+    return [
+        ("features.0", model.features[0]),
+        ("features.3", model.features[3]),
+        ("features.6", model.features[6]),
+        ("features.8", model.features[8]),
+        ("features.10", model.features[10]),
+        ("classifier.1", model.classifier[1]),
+        ("classifier.4", model.classifier[4]),
+        ("classifier.6", model.classifier[6]),
+    ]
+
+
+def collect_squeezenet_stage_modules(model: torch.nn.Module) -> list[tuple[str, torch.nn.Module]]:
+    fire_ids = (3, 4, 6, 7, 9, 10, 11, 12)
+    stage_modules = [("features.0", model.features[0])]
+    stage_modules.extend((f"features.{i}", model.features[i]) for i in fire_ids)
+    stage_modules.append(("classifier.1", model.classifier[1]))
+    return stage_modules
+
+
+def collect_mobilenet_v3_small_stage_modules(
+    model: torch.nn.Module,
+) -> list[tuple[str, torch.nn.Module]]:
+    return [(f"features.{i}", model.features[i]) for i in range(len(model.features))]
+
+
+def collect_efficientnet_b0_stage_modules(
+    model: torch.nn.Module,
+) -> list[tuple[str, torch.nn.Module]]:
+    stage_modules: list[tuple[str, torch.nn.Module]] = [("features.0", model.features[0])]
+    for group_idx in range(1, 8):
+        block_group = model.features[group_idx]
+        for block_idx, block in enumerate(block_group):
+            stage_modules.append((f"features.{group_idx}.{block_idx}", block))
+    stage_modules.append(("features.8", model.features[8]))
+    return stage_modules
+
+
+def collect_shufflenet_stage_modules(model: torch.nn.Module) -> list[tuple[str, torch.nn.Module]]:
+    stage_modules: list[tuple[str, torch.nn.Module]] = [("conv1", model.conv1)]
+    for stage_name in ("stage2", "stage3", "stage4"):
+        stage = getattr(model, stage_name)
+        for block_idx, block in enumerate(stage):
+            stage_modules.append((f"{stage_name}.{block_idx}", block))
+    stage_modules.append(("conv5", model.conv5))
+    return stage_modules
+
+
+def collect_mobilenet_v2_stage_modules(model: torch.nn.Module) -> list[tuple[str, torch.nn.Module]]:
+    return [(f"features.{i}", model.features[i]) for i in range(len(model.features))]
+
+
+def collect_stage_modules(model_name: str, model: torch.nn.Module) -> list[tuple[str, torch.nn.Module]]:
+    if model_name in {"resnet18", "resnet34", "resnet152", "resnet200"}:
+        return collect_resnet_stage_modules(model)
+    if model_name == "lenet5":
+        if not isinstance(model, LeNet5):
+            raise TypeError(f"Expected LeNet5 instance, got {type(model).__name__}.")
+        return collect_lenet5_stage_modules(model)
+    if model_name == "alexnet":
+        return collect_alexnet_stage_modules(model)
+    if model_name == "squeezenet1_1":
+        return collect_squeezenet_stage_modules(model)
+    if model_name == "mobilenet_v3_small":
+        return collect_mobilenet_v3_small_stage_modules(model)
+    if model_name == "efficientnet_b0":
+        return collect_efficientnet_b0_stage_modules(model)
+    if model_name == "shufflenet_v2_x1_0":
+        return collect_shufflenet_stage_modules(model)
+    if model_name == "mobilenet_v2":
+        return collect_mobilenet_v2_stage_modules(model)
+    raise ValueError(f"Unsupported model for stage extraction: {model_name}")
 
 
 def profile_model(
@@ -99,7 +244,7 @@ def profile_model(
     model = model_builder(model_name).to(device)
     model.eval()
 
-    stage_modules = collect_stage_modules(model)
+    stage_modules = collect_stage_modules(model_name, model)
     stage_names = [name for name, _ in stage_modules]
     stats = {name: StageStat() for name in stage_names}
 

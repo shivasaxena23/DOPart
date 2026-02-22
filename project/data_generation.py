@@ -4,6 +4,24 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DNN_DIR = REPO_ROOT / "DNNs"
+PROFILE_MODELS = (
+    "lenet5",
+    "alexnet",
+    "squeezenet1_1",
+    "mobilenet_v3_small",
+    "efficientnet_b0",
+    "shufflenet_v2_x1_0",
+    "mobilenet_v2",
+    "resnet18",
+    "resnet34",
+    "resnet152",
+    "resnet200",
+)
+
+LEGACY_STAGE_PROFILE_MAP = {
+    152: "resnet152",
+    200: "resnet200",
+}
 
 
 def _load_stage_profile(model_name: str) -> tuple[np.ndarray, np.ndarray]:
@@ -27,8 +45,17 @@ def _load_stage_profile(model_name: str) -> tuple[np.ndarray, np.ndarray]:
     return compute_values_remote, input_data_real
 
 
-def system_values(i):
-    if i == 0:
+def system_values(i, profile_model: str | None = None):
+    selected_profile = profile_model
+    if selected_profile is not None and selected_profile not in PROFILE_MODELS:
+        allowed = ", ".join(PROFILE_MODELS)
+        raise ValueError(f"Unsupported profile model '{selected_profile}'. Choose one of: {allowed}")
+    if selected_profile is None:
+        selected_profile = LEGACY_STAGE_PROFILE_MAP.get(i)
+
+    if selected_profile is not None:
+        compute_values_remote, input_data_real = _load_stage_profile(selected_profile)
+    elif i == 0:
         with (REPO_ROOT / "resnet34_compute_values_224_t4.npy").open("rb") as f:
             model_compute_values = np.load(f, allow_pickle=True)
         model_compute_values_remote = model_compute_values[1000:10000, :]  # 1000 or 10000
@@ -71,13 +98,16 @@ def system_values(i):
             ],
             dtype=float,
         )
-    elif i in (152, 200):
-        compute_values_remote, input_data_real = _load_stage_profile(f"resnet{i}")
     elif i > 0:
         compute_values_remote = np.concatenate([np.zeros(i - 1), [10]])
         input_data_real = np.concatenate([[10] * i]).astype(float)
     else:
-        raise ValueError("stages must be 0, 152, 200, or a positive integer.")
+        raise ValueError(
+            "stages must be 0, 152, 200, or a positive integer. "
+            "You can also set profile_model to one of: "
+            + ", ".join(PROFILE_MODELS)
+            + "."
+        )
 
     print(len(compute_values_remote), len(input_data_real))
     return compute_values_remote, input_data_real

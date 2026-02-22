@@ -6,6 +6,10 @@ from scipy.special import lambertw
 
 e = math.e
 
+def DOPartRandRatio(r, R):
+  al = R / r
+  return 1 / (1 + (lambertw((1 / (al * e)) - 1 / e).real))
+
 def _prepare_cumsums(current_comms_uniform, current_comps_local, current_comps_remote):
   comms = np.asarray(current_comms_uniform, dtype=float)
   local = np.asarray(current_comps_local, dtype=float)
@@ -111,14 +115,16 @@ def DOPartRAND(current_comms_uniform, current_comps_local, current_comps_remote,
       current_comms_uniform, current_comps_local, current_comps_remote
   )
 
+  ratio = DOPartRandRatio(r, R)
   Tr = remote_suffix[0]
   ep, bound = rand_params if rand_params is not None else _rand_threshold_params(r, R)
   b = random.random()
   thresh = _sample_threshold(r, R, ep, bound, b)
 
+
   for i in range(span):
       T_i = local_prefix[i] + comms[i] + remote_suffix[i]
-      if T_i <= thresh * Tr:
+      if T_i <= thresh * Tr: # and T_i <= R*Tr/ratio
         return float(T_i), float(comms[i]), i
 
   return float(local_prefix[-1]), 0.0, int(comms.size)
@@ -139,7 +145,9 @@ def DOPartARAND(current_comms_uniform, current_comps_local, current_comps_remote
 
       alm = (prefix_i + r * suffix_i) / T_bar
       alM = (prefix_i + R * suffix_i) / T_bar
-
+      
+      ratio = DOPartRandRatio(alm, alM)
+      
       if alM == alm:
         thresh = alM
       else:
@@ -152,7 +160,7 @@ def DOPartARAND(current_comms_uniform, current_comps_local, current_comps_remote
           thresh = float(alM - (alM - alm) / math.exp(b * (alM - ep) / alM))
 
       T_i = prefix_i + comms[i] + suffix_i
-      if T_i <= thresh * T_bar:
+      if T_i <= thresh * T_bar and b <= bound: # and T_i <= alM * T_bar / ratio
         return float(T_i), float(comms[i]), i
 
   return float(local_prefix[-1]), 0.0, int(comms.size)
@@ -195,7 +203,8 @@ def TBP(current_comms_uniform,current_comps_local,current_comps_remote,r,R,ratio
 
   Tr = remote_suffix[0]
   alM = R
-  old_i = alM*Tr #Original Plots
+  # old_i = alM*Tr #Original Plots
+  old_i = alM*Tr/ratio #Original Plots
   a = 0.0
 
   for i in range(span):

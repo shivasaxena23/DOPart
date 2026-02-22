@@ -6,14 +6,26 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
-from data_generation import system_values
+from data_generation import PROFILE_MODELS, system_values
 from methods import TBP, DOPart, DOPartARAND, DOPartARANDR, DOPartRAND, DOPartRANDR, TBP_ratio, rand_threshold_params
 import argparse
 
 from findCommsRange import commsRange
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--stages", type=int, default=0)
+parser.add_argument(
+  "--stages",
+  type=int,
+  default=0,
+  help="Synthetic stage count by default. Legacy profile aliases: 152->resnet152, 200->resnet200.",
+)
+parser.add_argument(
+  "--profile-model",
+  type=str,
+  choices=PROFILE_MODELS,
+  default=None,
+  help="Load pre-profiled stage delay/input data from DNNs for this model name.",
+)
 
 # booleans
 parser.add_argument("--comms-uniform", action=argparse.BooleanOptionalAction, default=False)
@@ -83,11 +95,14 @@ period = args.period
 random_min = args.random_min
 ci_level = args.ci
 seed = args.seed
+profile_model = args.profile_model
 print("Random min:", random_min)
 if seed is not None:
   np.random.seed(seed)
   random.seed(seed)
   print("Seed:", seed)
+if profile_model is not None:
+  print("Profile model:", profile_model)
 stage_plots = args.stage_plots or args.stage_plots_only
 stage_plot_out_dir = Path(args.stage_plot_out_dir).resolve()
 
@@ -142,14 +157,17 @@ def plot_stage_profiles(
 alphas = [alpha_min + period*i for i in range(int(round((alpha_max-alpha_min)/period))+1)]
 algs = ["AutoNeuro", "DOPart", "Neuro", "Remote Only", "Local Only", "DOPart-R", "DOPart-DR", "DOPart-AR", "DOPart-DAR", "Threat Based", "OPT"]
 print(alphas)
-current_comps_remote, input_data_real = system_values(v)
+current_comps_remote, input_data_real = system_values(v, profile_model=profile_model)
 current_comps_remote = np.asarray(current_comps_remote, dtype=float)
 input_data_real = np.asarray(input_data_real, dtype=float)
 
 print(len(current_comps_remote))
 
 if stage_plots:
-  stage_tag = "resnet152" if v == 152 else "resnet200" if v == 200 else f"stages_{v}"
+  if profile_model is not None:
+    stage_tag = profile_model
+  else:
+    stage_tag = "resnet152" if v == 152 else "resnet200" if v == 200 else f"stages_{v}"
   latency_path, input_size_path = plot_stage_profiles(
     current_comps_remote,
     input_data_real,
@@ -362,6 +380,7 @@ h.ticklabel_format(useMathText=True)
 # Add command-line parameters to the figure.
 cmd_parts = [
   f"stages={v}",
+  f"profile_model={profile_model}",
   f"comms_uniform={comms_uniform}",
   f"log_uniform={log_uniform}",
   f"alpha_min={alpha_min}",
