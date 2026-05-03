@@ -7,7 +7,17 @@ from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 from data_generation import PROFILE_MODELS, system_values
-from methods import TBP, DOPart, DOPartARAND, DOPartARANDR, DOPartRAND, DOPartRANDR, TBP_ratio, rand_threshold_params
+from methods import (
+  TBP,
+  TBP_RAW,
+  DOPart,
+  DOPartARANDR,
+  DOPartR,
+  DSR,
+  DOPartRANDR,
+  TBP_ratio,
+  rand_threshold_params,
+)
 import argparse
 
 from findCommsRange import commsRange
@@ -32,6 +42,12 @@ parser.add_argument("--comms-uniform", action=argparse.BooleanOptionalAction, de
 parser.add_argument("--log-uniform", action=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--random-min", action=argparse.BooleanOptionalAction, default=True)
 parser.add_argument(
+  "--sweep-mid-scale",
+  action=argparse.BooleanOptionalAction,
+  default=False,
+  help="Use mid-scale as the x-axis sweep variable while keeping alpha bounds fixed.",
+)
+parser.add_argument(
   "--offload-plot",
   action=argparse.BooleanOptionalAction,
   default=True,
@@ -45,6 +61,24 @@ parser.add_argument("--period", type=float, default=0.5)
 parser.add_argument("--alpha-fixed", action=argparse.BooleanOptionalAction, default=True)
 parser.add_argument("--comms-range-factor", type=int, default=1)
 parser.add_argument("--mid-scale", type=float, default=1)
+parser.add_argument(
+  "--mid-scale-min",
+  type=float,
+  default=None,
+  help="Start mid-scale for --sweep-mid-scale (defaults to --mid-scale).",
+)
+parser.add_argument(
+  "--mid-scale-max",
+  type=float,
+  default=None,
+  help="End mid-scale for --sweep-mid-scale (defaults to --mid-scale).",
+)
+parser.add_argument(
+  "--mid-scale-period",
+  type=float,
+  default=0.1,
+  help="Step size for --sweep-mid-scale.",
+)
 parser.add_argument("--lower-bound", type=float, default=0.25)
 parser.add_argument("--upper-bound", type=float, default=2.5)
 parser.add_argument(
@@ -85,7 +119,7 @@ parser.add_argument(
 
 args = parser.parse_args()
 NUM_SAMPLES = 7000
-IGNORED_ALGS = {0, 2, 6, 8}
+IGNORED_ALG_NAMES = {"AutoNeuro", "Neuro", "DOPart-DR", "DOPart-DAR"}
 
 v = args.stages
 comms_uniform = args.comms_uniform
@@ -99,10 +133,14 @@ alpha_min = args.alpha_min
 alpha_max = args.alpha_max
 period = args.period
 random_min = args.random_min
+sweep_mid_scale = args.sweep_mid_scale
 offload_plot = args.offload_plot
 ci_level = args.ci
 seed = args.seed
 profile_model = args.profile_model
+mid_scale_min = mid_scale if args.mid_scale_min is None else args.mid_scale_min
+mid_scale_max = mid_scale if args.mid_scale_max is None else args.mid_scale_max
+mid_scale_period = args.mid_scale_period
 print("Random min:", random_min)
 if seed is not None:
   np.random.seed(seed)
@@ -161,9 +199,52 @@ def plot_stage_profiles(
   fig_size.savefig(input_size_path, dpi=180, bbox_inches="tight")
   return latency_path, input_size_path
 
-alphas = [alpha_min + period*i for i in range(int(round((alpha_max-alpha_min)/period))+1)]
-algs = ["AutoNeuro", "DOPart", "Neuro", "Remote Only", "Local Only", "DOPart-R", "DOPart-DR", "DOPart-AR", "DOPart-DAR", "Threat Based", "OPT"]
-print(alphas)
+
+def _build_sweep_values(start: float, end: float, step: float) -> list[float]:
+  if step <= 0:
+    raise ValueError("Sweep step must be > 0.")
+  if end < start:
+    raise ValueError("Sweep end must be >= sweep start.")
+  return [round(start + step * i, 10) for i in range(int(round((end - start) / step)) + 1)]
+
+
+if sweep_mid_scale:
+  x_values = _build_sweep_values(mid_scale_min, mid_scale_max, mid_scale_period)
+  x_col = "MidScale"
+else:
+  x_values = _build_sweep_values(alpha_min, alpha_max, period)
+  x_col = "Alpha"
+
+algs = [
+  "AutoNeuro",
+  "DOPart",
+  "Neuro",
+  "Remote Only",
+  "Local Only",
+  "DSR",
+  "DOPart-DR",
+  "DOPart-R",
+  "DOPart-DAR",
+  "Threat Based (s)",
+  "Threat Based (s')",
+  "OPT",
+]
+ALG_IDX = {name: idx for idx, name in enumerate(algs)}
+IGNORED_ALGS = {ALG_IDX[name] for name in IGNORED_ALG_NAMES}
+AUTO_NEURO_IDX = ALG_IDX["AutoNeuro"]
+DOPART_IDX = ALG_IDX["DOPart"]
+NEURO_IDX = ALG_IDX["Neuro"]
+REMOTE_ONLY_IDX = ALG_IDX["Remote Only"]
+LOCAL_ONLY_IDX = ALG_IDX["Local Only"]
+DSR_IDX = ALG_IDX["DSR"]
+DOPART_DR_IDX = ALG_IDX["DOPart-DR"]
+DOPART_R_IDX = ALG_IDX["DOPart-R"]
+DOPART_DAR_IDX = ALG_IDX["DOPart-DAR"]
+TBP_RAW_IDX = ALG_IDX["Threat Based (s)"]
+TBP_IDX = ALG_IDX["Threat Based (s')"]
+OPT_IDX = ALG_IDX["OPT"]
+
+print(x_values)
 current_comps_remote, input_data_real = system_values(v, profile_model=profile_model)
 current_comps_remote = np.asarray(current_comps_remote, dtype=float)
 input_data_real = np.asarray(input_data_real, dtype=float)
@@ -190,7 +271,7 @@ if stage_plots:
       plt.close("all")
     raise SystemExit(0)
 
-if comms_range_factor == 1:
+if comms_range_factor == 1 and not sweep_mid_scale:
   lb, ub = commsRange(alpha_min, alpha_max, log_uniform, alpha_fixed, mid_scale) 
 
 def genAlphas(a,b,size):
@@ -199,16 +280,22 @@ def genAlphas(a,b,size):
     else:
         return np.power(2.0, np.random.uniform(a, b, size=size))
 
-def generateSamples(i):
+def generateSamples(i, sweep_value):
   local_alpha_min = alpha_min
   local_alpha_max = alpha_max
+  local_mid_scale = mid_scale
   local_lb = lb
   local_ub = ub
 
-  if alpha_fixed:
-    local_alpha_max = alphas[i]
+  if sweep_mid_scale:
+    local_mid_scale = sweep_value
+    if comms_range_factor == 1:
+      local_lb, local_ub = commsRange(alpha_min, alpha_max, log_uniform, alpha_fixed, local_mid_scale)
   else:
-    local_alpha_min = alphas[i]
+    if alpha_fixed:
+      local_alpha_max = sweep_value
+    else:
+      local_alpha_min = sweep_value
 
   if log_uniform:
     b = math.pow(2,local_alpha_max)
@@ -218,7 +305,13 @@ def generateSamples(i):
     a = local_alpha_min
 
   if comms_range_factor == 2:
-    local_lb, local_ub = commsRange(alpha_min, alpha_max,log_uniform=log_uniform, alpha_fixed=alpha_fixed) 
+    local_lb, local_ub = commsRange(
+      alpha_min,
+      alpha_max,
+      log_uniform=log_uniform,
+      alpha_fixed=alpha_fixed,
+      mid_scale=local_mid_scale,
+    ) 
 
   
   n_layers = current_comps_remote.size
@@ -247,7 +340,7 @@ def generateSamples(i):
     remote_suffix[:-1] = np.cumsum(current_comps_remote[::-1])[::-1]
 
   makespan_matrix = local_prefix + current_comms_uniform + remote_suffix
-  if 0 not in IGNORED_ALGS:
+  if AUTO_NEURO_IDX not in IGNORED_ALGS:
     makespan = np.mean(makespan_matrix, axis=0)
     ANeuro_best_point = int(np.argmin(makespan))
   else:
@@ -258,6 +351,9 @@ def generateSamples(i):
 
   ratio = TBP_ratio(a,b,current_comms_uniform.shape[1])
   rand_params = rand_threshold_params(a, b)
+  dsr_rand_params = rand_threshold_params(min(a, 1.0), max(b, 1.0))
+
+  # print(rand_params, ratio, a, b)
 
   for j in range(NUM_SAMPLES):
     comms_j = current_comms_uniform[j]
@@ -267,40 +363,57 @@ def generateSamples(i):
     opt_best = float(np.min(totals_j))
     opt_idx = int(np.argmin(totals_j))
     
-    if 0 not in IGNORED_ALGS:
-      TALG[0][j] = float(totals_j[ANeuro_best_point])
-    TOFF[0][j] = float(ANeuro_best_point)
-    if 2 not in IGNORED_ALGS:
-      TALG[2][j] = float(totals_j[-1])
-    TOFF[2][j] = float(n_layers)
-    
-    alg_best12, _, idx12, _ = DOPart(comms_j, local_j, current_comps_remote, a, b, 0)
-    alg_best5, _, idx5 = DOPartRAND(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
-    alg_best7, _, idx7 = DOPartARAND(comms_j, local_j, current_comps_remote, a, b) #USED
-    alg_best9, _, idx9 = TBP(comms_j, local_j, current_comps_remote, a, b, ratio) #USED
+    if AUTO_NEURO_IDX not in IGNORED_ALGS:
+      TALG[AUTO_NEURO_IDX][j] = float(totals_j[ANeuro_best_point])
+    TOFF[AUTO_NEURO_IDX][j] = float(ANeuro_best_point)
+    if NEURO_IDX not in IGNORED_ALGS:
+      TALG[NEURO_IDX][j] = float(totals_j[-1])
+    TOFF[NEURO_IDX][j] = float(n_layers)
 
-    if 6 not in IGNORED_ALGS:
-      TALG[6][j], _, idx6 = DOPartRANDR(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
-      TOFF[6][j] = float(idx6)
-    if 8 not in IGNORED_ALGS:
-      TALG[8][j], _, idx8 = DOPartARANDR(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
-      TOFF[8][j] = float(idx8)
-    
-    TALG[1][j] = alg_best12
-    TOFF[1][j] = float(idx12)
-    TALG[3][j] = float(totals_j[0])
-    TOFF[3][j] = 0.0
-    TALG[4][j] = float(totals_j[-1])
-    TOFF[4][j] = float(n_layers)
-    TALG[5][j] = alg_best5
-    TOFF[5][j] = float(idx5)
-    TALG[7][j] = alg_best7
-    TOFF[7][j] = float(idx7)
-    TALG[9][j] = alg_best9
-    TOFF[9][j] = float(idx9)
-    TALG[10][j] = opt_best
-    TOFF[10][j] = float(opt_idx)
-  print("Alpha: ", alphas[i],"Average local computation delay:", makespan_matrix.mean(axis=0)[-1]/sum(current_comps_remote), "Average remote computation delay:", makespan_matrix.mean(axis=0)[0]/sum(current_comps_remote))
+    dopart_best, _, dopart_idx, _ = DOPart(comms_j, local_j, current_comps_remote, a, b, 0)
+    TALG[DOPART_IDX][j] = dopart_best
+    TOFF[DOPART_IDX][j] = float(dopart_idx)
+
+    alg_best5, _, idx5 = DSR(comms_j, local_j, current_comps_remote, a, b, rand_params=dsr_rand_params) #USED
+    alg_best7, _, idx7 = DOPartR(comms_j, local_j, current_comps_remote, a, b) #USED
+    alg_best9, _, idx9 = TBP(comms_j, local_j, current_comps_remote, a, b, ratio) #USED
+    alg_best9_raw, _, idx9_raw = TBP_RAW(comms_j, local_j, current_comps_remote, a, b, ratio) #USED
+
+    if DOPART_DR_IDX not in IGNORED_ALGS:
+      TALG[DOPART_DR_IDX][j], _, idx6 = DOPartRANDR(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
+      TOFF[DOPART_DR_IDX][j] = float(idx6)
+    if DOPART_DAR_IDX not in IGNORED_ALGS:
+      TALG[DOPART_DAR_IDX][j], _, idx8 = DOPartARANDR(comms_j, local_j, current_comps_remote, a, b, rand_params=rand_params) #USED
+      TOFF[DOPART_DAR_IDX][j] = float(idx8)
+
+    TALG[REMOTE_ONLY_IDX][j] = float(totals_j[0])
+    TOFF[REMOTE_ONLY_IDX][j] = 0.0
+    TALG[LOCAL_ONLY_IDX][j] = float(totals_j[-1])
+    TOFF[LOCAL_ONLY_IDX][j] = float(n_layers)
+    TALG[DSR_IDX][j] = alg_best5
+    TOFF[DSR_IDX][j] = float(idx5)
+    TALG[DOPART_R_IDX][j] = alg_best7
+    TOFF[DOPART_R_IDX][j] = float(idx7)
+    TALG[TBP_RAW_IDX][j] = alg_best9_raw
+    TOFF[TBP_RAW_IDX][j] = float(idx9_raw)
+    TALG[TBP_IDX][j] = alg_best9
+    TOFF[TBP_IDX][j] = float(idx9)
+    TALG[OPT_IDX][j] = opt_best
+    TOFF[OPT_IDX][j] = float(opt_idx)
+  sweep_label = "Mid-scale" if sweep_mid_scale else "Alpha"
+  print(sweep_label + ": ", sweep_value, "Average local computation delay:", makespan_matrix.mean(axis=0)[-1]/sum(current_comps_remote), "Average remote computation delay:", makespan_matrix.mean(axis=0)[0]/sum(current_comps_remote))
+  print(
+    "Threat Based (s) avg:",
+    float(np.mean(TALG[TBP_RAW_IDX])),
+    "avg offload:",
+    float(np.mean(TOFF[TBP_RAW_IDX])),
+  )
+  print(
+    "Threat Based (s') avg:",
+    float(np.mean(TALG[TBP_IDX])),
+    "avg offload:",
+    float(np.mean(TOFF[TBP_IDX])),
+  )
   return TALG, TOFF
 
 
@@ -315,9 +428,12 @@ def generateSamples(i):
 TALG_final = [[] for _ in range(len(algs))]
 TOFF_final = [[] for _ in range(len(algs))]
 
-for i in range(len(alphas)):
-  TALG, TOFF = generateSamples(i)
-  print(f"Completed for alpha value = {alphas[i]}")
+for i, sweep_value in enumerate(x_values):
+  TALG, TOFF = generateSamples(i, sweep_value)
+  if sweep_mid_scale:
+    print(f"Completed for mid-scale value = {sweep_value}")
+  else:
+    print(f"Completed for alpha value = {sweep_value}")
   for j in range(len(TALG)):
     TALG_final[j].append(TALG[j])
     TOFF_final[j].append(TOFF[j])
@@ -326,19 +442,19 @@ ignore = sorted(IGNORED_ALGS)
 active_algs = [algs[k] for k in range(len(algs)) if k not in ignore]
 compiled_frames = []
 offload_frames = []
-alpha_values = np.asarray(alphas, dtype=float)
+x_axis_values = np.asarray(x_values, dtype=float)
 
 for k in range(len(algs)):
   print("Processing Algorithm:",algs[k])
   if k not in ignore:
     values = np.asarray(TALG_final[k], dtype=float).reshape(-1)
     offload_idx = np.asarray(TOFF_final[k], dtype=float).reshape(-1)
-    alpha_repeated = np.repeat(alpha_values, NUM_SAMPLES)
+    x_axis_repeated = np.repeat(x_axis_values, NUM_SAMPLES)
     compiled_frames.append(
       pd.DataFrame(
         {
           "Average Makespan": values,
-          "Alpha": alpha_repeated,
+          x_col: x_axis_repeated,
           "Alg": algs[k],
         }
       )
@@ -347,7 +463,7 @@ for k in range(len(algs)):
       pd.DataFrame(
         {
           "Offload Layer": offload_idx,
-          "Alpha": alpha_repeated,
+          x_col: x_axis_repeated,
           "Alg": algs[k],
         }
       )
@@ -382,6 +498,9 @@ def _lineplot_with_ci(ax, lineplot_kwargs):
 
 
 def _set_alpha_xlabel(h):
+  if sweep_mid_scale:
+    h.set_xlabel("mid-scale")
+    return
   if alpha_fixed:
     if log_uniform:
       h.set_xlabel(r'$\log_2\alpha$' + r'$_\mathregular{max}$')
@@ -405,7 +524,7 @@ def _style_legend(ax):
 # Main makespan plot.
 fig_main, ax_main = plt.subplots()
 lineplot_kwargs_main = dict(
-  x="Alpha",
+  x=x_col,
   y="Average Makespan",
   hue="Alg",
   data=df_main1,
@@ -420,7 +539,7 @@ lineplot_kwargs_main = dict(
   seed=seed,
 )
 h_main = _lineplot_with_ci(ax_main, lineplot_kwargs_main)
-h_main.set_xticks(alphas)
+h_main.set_xticks(x_values)
 _set_alpha_xlabel(h_main)
 h_main.set_ylabel(r'Average ' + r'$T_\mathregular{ALG}$' + r' [ms]')
 h_main.ticklabel_format(useMathText=True)
@@ -434,9 +553,14 @@ cmd_parts = [
   f"profile_model={profile_model}",
   f"comms_uniform={comms_uniform}",
   f"log_uniform={log_uniform}",
+  f"sweep_mid_scale={sweep_mid_scale}",
   f"alpha_min={alpha_min}",
   f"alpha_max={alpha_max}",
   f"alpha_fixed={alpha_fixed}",
+  f"mid_scale={mid_scale}",
+  f"mid_scale_min={mid_scale_min}",
+  f"mid_scale_max={mid_scale_max}",
+  f"mid_scale_period={mid_scale_period}",
   f"lower_bound={lb}",
   f"upper_bound={ub}",
   f"ci={ci_level}",
@@ -455,7 +579,7 @@ fig_offload = None
 if offload_plot:
   fig_offload, ax_offload = plt.subplots()
   lineplot_kwargs_offload = dict(
-    x="Alpha",
+    x=x_col,
     y="Offload Layer",
     hue="Alg",
     data=df_offload,
@@ -470,7 +594,7 @@ if offload_plot:
     seed=seed,
   )
   h_offload = _lineplot_with_ci(ax_offload, lineplot_kwargs_offload)
-  h_offload.set_xticks(alphas)
+  h_offload.set_xticks(x_values)
   _set_alpha_xlabel(h_offload)
   h_offload.set_ylabel("Offload Layer Index")
   max_layer_idx = int(current_comps_remote.size)

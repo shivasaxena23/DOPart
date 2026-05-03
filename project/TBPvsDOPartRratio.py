@@ -23,4 +23,4 @@ for i in range(10000):
         diff = abs(v-x)
         ratio_tbp = x
 
-print("DOPart-R: ", ratio_dp,"TBP: ", ratio_tbp)
+print("DSR: ", ratio_dp,"TBP: ", ratio_tbp)

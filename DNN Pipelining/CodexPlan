@@ -9,9 +9,9 @@ What DOPart currently does
   - Communication delays by combining activation/input sizes with sampled bandwidth values.
 - It evaluates multiple algorithms per sample, including:
   - DOPart (deterministic threshold)
-  - DOPart-R (single random threshold)
+  - DSR (single random threshold)
   - DOPart-DR (fresh random threshold each step)
-  - DOPart-AR (adaptive randomized threshold)
+  - DOPart-R (adaptive randomized threshold)
   - DOPart-DAR (currently aliased to DOPart-DR in code)
   - Threat Based (TBP)
   - OPT baseline (best split in hindsight)

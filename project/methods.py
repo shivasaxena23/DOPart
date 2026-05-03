@@ -49,6 +49,10 @@ def rand_threshold_params(r, R):
   return _rand_threshold_params(r, R)
 
 
+def _paper_alpha_bounds(r, R):
+  return min(r, 1.0), max(R, 1.0)
+
+
 def ALPHAOPT(current_comms_uniform, current_comps_local, current_comps_remote):
   comms, _, _, local_prefix, remote_suffix, span = _prepare_cumsums(
       current_comms_uniform, current_comps_local, current_comps_remote
@@ -109,17 +113,18 @@ def DOPartRANDR(current_comms_uniform, current_comps_local, current_comps_remote
 
   return float(local_prefix[-1]), 0.0, int(comms.size)
 
-#Non Adaptive Randomized Thresholding Algorithm
-def DOPartRAND(current_comms_uniform, current_comps_local, current_comps_remote, r, R, rand_params=None):
+# Static randomized helper from the v32 paper.
+def DSR(current_comms_uniform, current_comps_local, current_comps_remote, r, R, rand_params=None):
   comms, _, _, local_prefix, remote_suffix, span = _prepare_cumsums(
       current_comms_uniform, current_comps_local, current_comps_remote
   )
 
-  ratio = DOPartRandRatio(r, R)
+  r_paper, R_paper = _paper_alpha_bounds(r, R)
+  ratio = DOPartRandRatio(r_paper, R_paper)
   Tr = remote_suffix[0]
-  ep, bound = rand_params if rand_params is not None else _rand_threshold_params(r, R)
+  ep, bound = rand_params if rand_params is not None else _rand_threshold_params(r_paper, R_paper)
   b = random.random()
-  thresh = _sample_threshold(r, R, ep, bound, b)
+  thresh = _sample_threshold(r_paper, R_paper, ep, bound, b)
 
 
   for i in range(span):
@@ -129,12 +134,13 @@ def DOPartRAND(current_comms_uniform, current_comps_local, current_comps_remote,
 
   return float(local_prefix[-1]), 0.0, int(comms.size)
 
-#Adaptive Randomized Thresholding Algorithm
-def DOPartARAND(current_comms_uniform, current_comps_local, current_comps_remote, r, R):
+# Algorithm 2 from the v32 paper.
+def DOPartR(current_comms_uniform, current_comps_local, current_comps_remote, r, R):
   comms, _, _, local_prefix, remote_suffix, span = _prepare_cumsums(
       current_comms_uniform, current_comps_local, current_comps_remote
   )
 
+  min_alpha, max_alpha = _paper_alpha_bounds(r, R)
   b = random.random()
   for i in range(span):
       prefix_i = local_prefix[i]
@@ -143,8 +149,8 @@ def DOPartARAND(current_comms_uniform, current_comps_local, current_comps_remote
       if T_bar == 0:
         continue
 
-      alm = (prefix_i + r * suffix_i) / T_bar
-      alM = (prefix_i + R * suffix_i) / T_bar
+      alm = (prefix_i + min_alpha * suffix_i) / T_bar
+      alM = (prefix_i + max_alpha * suffix_i) / T_bar
       
       ratio = DOPartRandRatio(alm, alM)
       
@@ -156,10 +162,18 @@ def DOPartARAND(current_comms_uniform, current_comps_local, current_comps_remote
         thresh = float(alM - (alM - alm) / math.exp(b * (alM - ep) / alM))
 
       T_i = prefix_i + comms[i] + suffix_i
-      if T_i <= thresh * T_bar: # and T_i <= alM * T_bar / ratio
+      
+      # if thresh > (alM - ep) and alm != alM:
+      #    print(alm, alM, "thresh: ", thresh, "alM - ep: ", alM - ep, "T_i: ", T_i, "T_bar: ", T_bar)
+
+      if T_i <= thresh * T_bar: #and T_i <= (alM - ep) * T_bar:
         return float(T_i), float(comms[i]), i
 
   return float(local_prefix[-1]), 0.0, int(comms.size)
+
+# Backwards-compatible names used by older experiments.
+DOPartRAND = DSR
+DOPartARAND = DOPartR
 
 #Non Adaptive Double Randomized Thresholding Algorithm
 def DOPartARANDR(current_comms_uniform, current_comps_local, current_comps_remote, r, R, rand_params=None):
@@ -192,6 +206,37 @@ def TBP_ratio(r,R,n):
 
 
 #Threat-Based Policy (Randomized)
+def TBP_RAW(current_comms_uniform,current_comps_local,current_comps_remote,r,R,ratio):
+  comms, _, _, local_prefix, remote_suffix, span = _prepare_cumsums(
+      current_comms_uniform, current_comps_local, current_comps_remote
+  )
+
+  Tr = remote_suffix[0]
+  alM = R
+  old_i = alM*Tr/ratio
+  a = 0.0
+
+  for i in range(span):
+      T_i = local_prefix[i] + comms[i] + remote_suffix[i]
+      if T_i < old_i:
+          denom = (alM*Tr - T_i)
+          if denom == 0:
+              continue
+
+          if a == 0:
+              s = (alM*Tr - ratio*T_i)/denom
+          else:
+              s = ratio*(old_i - T_i)/denom
+
+          old_i = T_i
+          a += s
+
+          if random.random() <= s:
+              return float(T_i), float(comms[i]), i
+
+  return float(local_prefix[-1]), 0.0, int(comms.size)
+
+
 def TBP(current_comms_uniform,current_comps_local,current_comps_remote,r,R,ratio):
   comms, _, _, local_prefix, remote_suffix, span = _prepare_cumsums(
       current_comms_uniform, current_comps_local, current_comps_remote
@@ -216,9 +261,16 @@ def TBP(current_comms_uniform,current_comps_local,current_comps_remote,r,R,ratio
               s = ratio*(old_i - T_i)/denom
 
           old_i = T_i
+          
+          remaining = 1 - a
+          if remaining <= 0:
+              break
+          s_prime = s / remaining
+          s_prime = min(max(s_prime, 0.0), 1.0)
+
           a += s
 
-          if random.random() <= s:
+          if random.random() <= s_prime:
               return float(T_i), float(comms[i]), i
 
   return float(local_prefix[-1]), 0.0, int(comms.size)
