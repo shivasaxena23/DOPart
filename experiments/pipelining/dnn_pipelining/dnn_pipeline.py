@@ -9,7 +9,7 @@ import numpy as np
 from scipy import sparse
 from scipy.optimize import Bounds, LinearConstraint, milp
 
-PROJECT_DIR = Path(__file__).resolve().parents[1] / "project"
+PROJECT_DIR = Path(__file__).resolve().parents[3] / "project"
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 

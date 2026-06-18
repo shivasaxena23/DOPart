@@ -1,0 +1,1 @@
+ python .\project\plot.py --stages 0 --no-comms-uniform --log-uniform --alpha-min -1 --alpha-max 3 --no-alpha-fixed --random-min --ci 95 --seed 42 --stage-plots --profile-model resnet34

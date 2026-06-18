@@ -2,6 +2,22 @@
 
  python .\project\plot.py --stages 0 --no-comms-uniform --log-uniform --alpha-min 0 --alpha-max 2.5 --alpha-fixed --lower-bound 0.25 --upper-bound 2.5
 
+## Plot Sweep Modes
+
+`project/plot.py` now supports two x-axis sweep modes:
+- Alpha sweep (default): vary alpha across the configured range.
+- Mid-scale sweep: vary `mid-scale` on the x-axis while keeping `alpha-min` and `alpha-max` fixed.
+
+Enable mid-scale sweep with:
+- `--sweep-mid-scale`
+- `--mid-scale-min`
+- `--mid-scale-max`
+- `--mid-scale-period`
+
+Example (fixed alpha bounds, sweep mid-scale):
+
+`python .\project\plot.py --stages 0 --profile-model mobilenet_v2 --no-comms-uniform --log-uniform --alpha-min -1 --alpha-max 3 --no-alpha-fixed --random-min --seed 42 --sweep-mid-scale --mid-scale-min 0.7 --mid-scale-max 1.3 --mid-scale-period 0.1`
+
 ## Refactor Summary (2026-02-10)
 
 ### Benchmark command

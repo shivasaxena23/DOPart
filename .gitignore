@@ -1,16 +1,24 @@
-# Large files
-*.tar.gz
-*.zip
-
-# Data directories
-data/
-*.npy
-
-# Jupyter
-.ipynb_checkpoints/
 __pycache__/
-*.pyc
-
-# IDE
+*.py[cod]
+.pytest_cache/
+.venv/
 .vscode/
-.idea/
+
+outputs/plots/*
+outputs/tables/*
+outputs/logs/*
+outputs/profiles/*
+!outputs/plots/.gitkeep
+!outputs/plots/archive/
+!outputs/plots/archive/**
+!outputs/tables/.gitkeep
+!outputs/logs/.gitkeep
+!outputs/profiles/.gitkeep
+!outputs/profiles/archive/
+!outputs/profiles/archive/**
+
+project/plots/*
+!project/plots/.gitkeep
+
+Dispersion/results/*
+!Dispersion/results/.gitkeep

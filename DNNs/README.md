@@ -79,6 +79,12 @@ After generating profile files in `DNNs/`, run:
 python .\project\plot.py --profile-model mobilenet_v2 --stages 0 --no-comms-uniform --log-uniform --alpha-min -1 --alpha-max 3 --no-alpha-fixed --lower-bound 0.05 --upper-bound 2.5 --random-min --ci 95 --seed 42
 ```
 
+Sweep mid-scale on the x-axis (fixed alpha bounds):
+
+```powershell
+python .\project\plot.py --profile-model mobilenet_v2 --stages 0 --no-comms-uniform --log-uniform --alpha-min -1 --alpha-max 3 --no-alpha-fixed --random-min --seed 42 --sweep-mid-scale --mid-scale-min 0.7 --mid-scale-max 1.3 --mid-scale-period 0.1
+```
+
 Generate only stage profile plots for a profiled model:
 
 ```powershell
